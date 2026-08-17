@@ -1,0 +1,716 @@
+// ─────────────────────────────────────────────────────────────────────────
+// GECODIS CRM — Prisma schema
+// Domain model for a B2B logistics/transport/real-estate CRM.
+// Organised by module, mirroring the functional spec.
+// ─────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── USERS & AUTH ────────────────────────────
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  COMMERCIAL
+  LECTURE_SEULE
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          UserRole  @default(COMMERCIAL)
+  avatarUrl     String?
+  phone         String?
+  mfaEnabled    Boolean   @default(false)
+  mfaSecret     String?
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  ownedCompanies    Company[]          @relation("CompanyOwner")
+  activities        Activity[]         @relation("ActivityOwner")
+  tasks             TaskItem[]         @relation("TaskAssignee")
+  quotes            Quote[]            @relation("QuoteAuthor")
+  campaigns         Campaign[]         @relation("CampaignAuthor")
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  salesTargets      SalesTarget[]
+
+  @@index([email])
+}
+
+// ───────────────────────────── COMPANIES ───────────────────────────────
+
+enum PropertyStatus {
+  PROPRIETAIRE
+  LOCATAIRE
+  INCONNU
+}
+
+enum RealEstateAssetType {
+  ENTREPOT
+  PLUSIEURS_ENTREPOTS
+  BATIMENT_INDUSTRIEL
+  MAGASIN
+  PLATEFORME_LOGISTIQUE
+  BUREAU
+}
+
+enum CommercialPriority {
+  A_PLUS
+  A
+  B
+  C
+  D
+}
+
+enum PotentialLevel {
+  FAIBLE
+  MOYEN
+  FORT
+  TRES_FORT
+}
+
+model Company {
+  id              String   @id @default(cuid())
+
+  // --- Informations manuelles / légales ---
+  name            String
+  siren           String?  @unique
+  siret           String?
+  vatNumber       String?
+  address         String?
+  city            String?
+  postalCode      String?
+  department      String?
+  country         String   @default("France")
+  latitude        Float?
+  longitude       Float?
+  phone           String?
+  email           String?
+  website         String?
+  employeeCount   Int?
+  revenue         Float?   // CA
+  netIncome       Float?   // Résultat
+  capital         Float?
+  foundedAt       DateTime?
+  activity        String?
+  nafCode         String?
+  nafLabel        String?
+  notes           String?  @db.Text
+
+  // --- Enrichissement automatique ---
+  logoUrl         String?
+  description     String?  @db.Text
+  sector          String?
+  linkedinUrl     String?
+  facebookUrl     String?
+  instagramUrl    String?
+  twitterUrl      String?
+  googleMapsUrl   String?
+  googleRating    Float?
+  googleReviewsCount Int?
+  legalRepresentatives Json?     // [{name, role, since}]
+  enrichmentStatus     EnrichmentStatus @default(PENDING)
+  lastEnrichedAt       DateTime?
+
+  // --- IA : scores de besoins (0-100) ---
+  needScoreTransport    Int? @default(0)
+  needScoreLogistique   Int? @default(0)
+  needScoreStockage     Int? @default(0)
+  needScoreAffretement  Int? @default(0)
+  needScoreFulfillment  Int? @default(0)
+  needScoreEntrepot     Int? @default(0)
+  potential             PotentialLevel?
+  commercialPriority    CommercialPriority?
+  aiScoredAt            DateTime?
+  aiScoreSummary        String? @db.Text
+
+  // --- Immobilier ---
+  propertyStatus         PropertyStatus @default(INCONNU)
+  propertyStatusConfidence Int?         // 0-100
+  hasWarehouse            Boolean @default(false)
+  hasMultipleWarehouses   Boolean @default(false)
+  hasIndustrialBuilding   Boolean @default(false)
+  hasStore                Boolean @default(false)
+  hasLogisticsPlatform    Boolean @default(false)
+  realEstateConfidence    Int?    // 0-100 overall confidence
+  estimatedWarehouseSqm   Int?
+
+  ownerUserId     String?
+  ownerUser       User?    @relation("CompanyOwner", fields: [ownerUserId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  contacts        Contact[]
+  deals           Deal[]
+  activities      Activity[]
+  quotes          Quote[]
+  invoices        Invoice[]
+  profitabilityRecords ProfitabilityRecord[]
+  tasks           TaskItem[]
+  enrichmentLogs  EnrichmentLog[]
+  campaignRecipients CampaignRecipient[]
+  contracts       Contract[]
+  realEstateAssets CompanyRealEstateAsset[]
+  documents       Document[]
+  auditLogs       AuditLog[]
+
+  @@index([name])
+  @@index([nafCode])
+  @@index([city])
+  @@index([commercialPriority])
+  @@index([potential])
+}
+
+model CompanyRealEstateAsset {
+  id          String              @id @default(cuid())
+  companyId   String
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type        RealEstateAssetType
+  address     String?
+  city        String?
+  surfaceSqm  Int?
+  isOwned     Boolean?
+  confidence  Int?                // 0-100
+  source      String?
+  createdAt   DateTime            @default(now())
+
+  @@index([companyId])
+}
+
+enum EnrichmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+model EnrichmentLog {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider    String   // insee | pappers | inpi | societe_com | google_maps | linkedin | website
+  status      EnrichmentStatus
+  fieldsFound Json?
+  rawResponse Json?
+  errorMessage String?
+  createdAt   DateTime @default(now())
+
+  @@index([companyId])
+  @@index([provider])
+}
+
+// ───────────────────────────── CONTACTS ────────────────────────────────
+
+enum ContactDecisionRole {
+  PRESIDENT
+  DIRECTEUR_GENERAL
+  CEO
+  DIRECTEUR_SUPPLY_CHAIN
+  DIRECTEUR_LOGISTIQUE
+  ACHETEUR
+  RESPONSABLE_TRANSPORT
+  RESPONSABLE_ENTREPOT
+  RESPONSABLE_EXPLOITATION
+  RESPONSABLE_IMMOBILIER
+  RESPONSABLE_ACHATS
+  RESPONSABLE_SAV
+  RESPONSABLE_ECOMMERCE
+  COMMERCIAL
+  AUTRE
+}
+
+enum ContactInfluence {
+  DECISIONNAIRE
+  INFLUENCEUR
+  UTILISATEUR
+}
+
+model Contact {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  firstName     String
+  lastName      String
+  jobTitle      String?
+  phone         String?
+  mobilePhone   String?
+  email         String?
+  linkedinUrl   String?
+  birthday      DateTime?
+
+  isDecisionMaker Boolean? // manual override of AI-inferred field
+  influence       ContactInfluence @default(UTILISATEUR)
+
+  aiDecisionRole      ContactDecisionRole?
+  aiDecisionPower     Int?      // 0-100
+  aiClassifiedAt      DateTime?
+
+  notes         String?  @db.Text
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  activities    Activity[]
+  deals         Deal[]
+  campaignRecipients CampaignRecipient[]
+
+  @@index([companyId])
+  @@index([lastName])
+  @@index([aiDecisionRole])
+}
+
+// ───────────────────────────── PIPELINE / DEALS ────────────────────────
+
+enum PipelineStage {
+  PROSPECT_FROID
+  PREMIER_APPEL
+  RELANCE_1
+  RELANCE_2
+  RDV
+  DEVIS
+  NEGOCIATION
+  GAGNE
+  PERDU
+}
+
+model Deal {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  primaryContactId String?
+  primaryContact  Contact? @relation(fields: [primaryContactId], references: [id])
+
+  title           String
+  stage           PipelineStage @default(PROSPECT_FROID)
+  estimatedValue  Float?
+  probability     Int?     // 0-100
+  ownerUserId     String?
+
+  lostReason      String?
+  wonAt           DateTime?
+  lostAt          DateTime?
+
+  nextActionLabel     String?
+  nextActionDate      DateTime?
+  nextFollowUpAt      DateTime?
+  autoReminderEnabled Boolean  @default(true)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  stageHistory    DealStageEvent[]
+  activities      Activity[]
+  quotes          Quote[]
+
+  @@index([companyId])
+  @@index([stage])
+}
+
+model DealStageEvent {
+  id          String        @id @default(cuid())
+  dealId      String
+  deal        Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  stage       PipelineStage
+  comment     String?       @db.Text
+  summary     String?       @db.Text // compte rendu
+  nextAction  String?
+  nextActionDate DateTime?
+  enteredAt   DateTime      @default(now())
+
+  @@index([dealId])
+}
+
+// ───────────────────────────── ACTIVITIES ──────────────────────────────
+
+enum ActivityType {
+  APPEL
+  EMAIL
+  VISITE
+  RDV
+  TACHE
+  NOTE
+  DOCUMENT_ENVOYE
+}
+
+model Activity {
+  id          String       @id @default(cuid())
+  companyId   String
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId   String?
+  contact     Contact?     @relation(fields: [contactId], references: [id])
+  dealId      String?
+  deal        Deal?        @relation(fields: [dealId], references: [id])
+  ownerUserId String?
+  ownerUser   User?        @relation("ActivityOwner", fields: [ownerUserId], references: [id])
+
+  type        ActivityType
+  subject     String?
+  summary     String?      @db.Text // compte rendu
+  durationSec Int?         // call duration
+  documentUrl String?
+  occurredAt  DateTime     @default(now())
+  createdAt   DateTime     @default(now())
+
+  @@index([companyId])
+  @@index([contactId])
+  @@index([dealId])
+  @@index([type])
+}
+
+model TaskItem {
+  id            String    @id @default(cuid())
+  companyId     String?
+  company       Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assigneeId    String?
+  assignee      User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  title         String
+  description   String?   @db.Text
+  dueAt         DateTime?
+  completedAt   DateTime?
+  isAutomatic   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+
+  @@index([companyId])
+  @@index([assigneeId])
+  @@index([dueAt])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  body        String?
+  link        String?
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+// ───────────────────────────── QUOTES ───────────────────────────────────
+
+enum QuoteStatus {
+  BROUILLON
+  ENVOYE
+  SIGNE
+  REFUSE
+  EXPIRE
+}
+
+model Quote {
+  id            String      @id @default(cuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dealId        String?
+  deal          Deal?       @relation(fields: [dealId], references: [id])
+  authorId      String?
+  author        User?       @relation("QuoteAuthor", fields: [authorId], references: [id])
+
+  reference     String      @unique
+  version       Int         @default(1)
+  parentQuoteId String?
+  status        QuoteStatus @default(BROUILLON)
+  amountHt      Float
+  vatRate       Float       @default(20)
+  amountTtc     Float
+  validUntil    DateTime?
+  lines         Json?       // [{label, qty, unitPrice, total}]
+
+  signatureProvider  String?
+  signatureRequestId String?
+  signedAt           DateTime?
+  signedByName       String?
+  pdfUrl             String?
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  invoices      Invoice[]
+
+  @@index([companyId])
+  @@index([status])
+}
+
+// ───────────────────────────── INVOICES ─────────────────────────────────
+
+enum InvoiceStatus {
+  EN_ATTENTE
+  PAYEE
+  EN_RETARD
+  ANNULEE
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  companyId   String
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  quoteId     String?
+  quote       Quote?        @relation(fields: [quoteId], references: [id])
+
+  reference   String        @unique
+  amountHt    Float?
+  vatAmount   Float?
+  amountTtc   Float?
+  issuedAt    DateTime?
+  dueAt       DateTime?
+  paidAt      DateTime?
+  status      InvoiceStatus @default(EN_ATTENTE)
+
+  sourceFileUrl String?
+  extractionStatus String?   // pending | success | failed
+  extractionRaw    Json?
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  costs       CostEntry[]
+
+  @@index([companyId])
+  @@index([status])
+}
+
+// ───────────────────────────── PROFITABILITY ────────────────────────────
+
+enum CostCategory {
+  TRANSPORT
+  STOCKAGE
+  PREPARATION
+  SAV
+  PALETTES
+  MANUTENTION
+  AUTRE
+}
+
+model CostEntry {
+  id          String       @id @default(cuid())
+  invoiceId   String?
+  invoice     Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  companyId   String
+  category    CostCategory
+  amount      Float
+  period      DateTime     // month bucket
+  notes       String?
+
+  @@index([companyId, period])
+}
+
+enum ProfitabilityRating {
+  EXCELLENT
+  BON
+  FAIBLE
+  A_RISQUE
+}
+
+model ProfitabilityRecord {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  period          DateTime // first day of month
+  revenue         Float    @default(0)
+  transportCost   Float    @default(0)
+  storageCost     Float    @default(0)
+  prepCost        Float    @default(0)
+  savCost         Float    @default(0)
+  palletCost      Float    @default(0)
+  handlingCost    Float    @default(0)
+  otherCost       Float    @default(0)
+  marginAmount    Float    @default(0)
+  marginPercent   Float    @default(0)
+  rating          ProfitabilityRating?
+  computedAt      DateTime @default(now())
+
+  @@unique([companyId, period])
+  @@index([companyId])
+  @@index([period])
+}
+
+// ───────────────────────────── CAMPAIGNS ────────────────────────────────
+
+enum CampaignStatus {
+  BROUILLON
+  PROGRAMMEE
+  ENVOYEE
+  TERMINEE
+}
+
+model CampaignTemplate {
+  id        String     @id @default(cuid())
+  name      String
+  subject   String
+  bodyHtml  String     @db.Text
+  variables Json?
+  createdAt DateTime   @default(now())
+
+  campaigns Campaign[]
+}
+
+model Campaign {
+  id            String         @id @default(cuid())
+  name          String
+  templateId    String?
+  template      CampaignTemplate? @relation(fields: [templateId], references: [id])
+  authorId      String?
+  author        User?          @relation("CampaignAuthor", fields: [authorId], references: [id])
+
+  subject       String
+  bodyHtml      String         @db.Text
+  segmentFilter Json?          // saved search filter used to build recipient list
+  status        CampaignStatus @default(BROUILLON)
+  scheduledAt   DateTime?
+  sentAt        DateTime?
+
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  recipients    CampaignRecipient[]
+
+  @@index([status])
+}
+
+model CampaignRecipient {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id])
+  contactId   String?
+  contact     Contact? @relation(fields: [contactId], references: [id])
+  email       String
+
+  sentAt      DateTime?
+  openedAt    DateTime?
+  clickedAt   DateTime?
+  repliedAt   DateTime?
+  unsubscribedAt DateTime?
+  bounced     Boolean  @default(false)
+
+  @@index([campaignId])
+}
+
+// ───────────────────────────── REAL ESTATE OPPORTUNITIES ───────────────
+
+enum RealEstateOpportunityType {
+  LOCATION
+  VENTE
+}
+
+model RealEstateOpportunity {
+  id            String   @id @default(cuid())
+  reference     String   @unique
+  type          RealEstateOpportunityType
+  title         String
+  address       String?
+  city          String?
+  postalCode    String?
+  surfaceSqm    Int?
+  officeSqm     Int?
+  dockDoors     Int?
+  ceilingHeightM Float?
+  price         Float?
+  pricePerSqm   Float?
+  availableFrom DateTime?
+  description   String?  @db.Text
+  photos        Json?
+  isActive      Boolean  @default(true)
+  matchedCompanyIds Json? // cached list of company ids scored as good matches
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ───────────────────────────── CONTRACTS ────────────────────────────────
+
+enum ContractStatus {
+  BROUILLON
+  ACTIF
+  EXPIRE
+  RESILIE
+}
+
+model Contract {
+  id          String         @id @default(cuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  reference   String         @unique
+  title       String
+  status      ContractStatus @default(BROUILLON)
+  startDate   DateTime?
+  endDate     DateTime?
+  autoRenew   Boolean        @default(false)
+  noticePeriodDays Int?
+  annualValue Float?
+  fileUrl     String?
+  notes       String?        @db.Text
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([companyId])
+  @@index([status])
+}
+
+// ───────────────────────────── DOCUMENTS / SALES TARGETS / AUDIT ───────
+
+model Document {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  url         String
+  mimeType    String?
+  sizeBytes   Int?
+  createdAt   DateTime @default(now())
+
+  @@index([companyId])
+}
+
+model SalesTarget {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  period    DateTime // first day of month
+  targetRevenue Float
+  targetDeals   Int?
+
+  @@unique([userId, period])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id])
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([companyId])
+}
+
+model SavedSearch {
+  id        String   @id @default(cuid())
+  name      String
+  ownerUserId String?
+  filters   Json
+  createdAt DateTime @default(now())
+}

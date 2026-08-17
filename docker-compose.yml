@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gecodis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gecodis
+      POSTGRES_PASSWORD: gecodis
+      POSTGRES_DB: gecodis_crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gecodis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: gecodis-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional: enable full-text / faceted search at scale.
+  # The API works without it (falls back to PostgreSQL full-text search)
+  # but SEARCH_PROVIDER=elasticsearch will use this service when present.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: gecodis-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    profiles:
+      - search
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: gecodis-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    profiles:
+      - dev-mail
+
+volumes:
+  postgres_data:
+  es_data:

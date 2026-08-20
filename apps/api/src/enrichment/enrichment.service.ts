@@ -3,9 +3,11 @@ import { PrismaService } from "../prisma/prisma.service";
 import { InseeSireneProvider } from "./providers/insee-sirene.provider";
 import { PappersProvider } from "./providers/pappers.provider";
 import { GooglePlacesProvider } from "./providers/google-places.provider";
+import { LinkedInProvider } from "./providers/linkedin.provider";
 import { DemoFallbackProvider } from "./providers/demo-fallback.provider";
 import { CompanyDataProvider, EnrichmentFields } from "./types";
 import { ScoringService } from "../ai/scoring.service";
+import { ElasticsearchService } from "../search/elasticsearch.service";
 
 @Injectable()
 export class EnrichmentService {
@@ -15,15 +17,17 @@ export class EnrichmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scoring: ScoringService,
+    private readonly elasticsearch: ElasticsearchService,
     insee: InseeSireneProvider,
     pappers: PappersProvider,
     googlePlaces: GooglePlacesProvider,
+    linkedIn: LinkedInProvider,
     demoFallback: DemoFallbackProvider,
   ) {
     // Order matters: authoritative legal/financial sources first, generic
     // presence sources last, since later providers never overwrite a field
     // already filled by an earlier one (see mergeFields()).
-    this.providers = [insee, pappers, googlePlaces, demoFallback];
+    this.providers = [insee, pappers, googlePlaces, linkedIn, demoFallback];
   }
 
   /** Runs every enabled provider for a company, merges results, updates the record, then re-scores it. */
@@ -85,7 +89,7 @@ export class EnrichmentService {
       city: company.city,
     });
 
-    return this.prisma.company.update({
+    const updated = await this.prisma.company.update({
       where: { id: companyId },
       data: {
         needScoreTransport: result.needsScores.transport,
@@ -108,6 +112,8 @@ export class EnrichmentService {
         realEstateConfidence: result.realEstate.realEstateConfidence,
       },
     });
+    await this.elasticsearch.indexCompany(updated);
+    return updated;
   }
 
   /** Only fills fields that are still empty — never overwrites manually-entered or already-enriched data. */

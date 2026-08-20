@@ -1,10 +1,16 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { PdfService } from "../pdf/pdf.service";
+import { WebhookDispatcherService } from "../webhooks/webhook-dispatcher.service";
 import { CreateQuoteDto, SignQuoteDto, UpdateQuoteDto } from "./dto/quote.dto";
 
 @Injectable()
 export class QuotesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pdfService: PdfService,
+    private readonly webhooks: WebhookDispatcherService,
+  ) {}
 
   private async generateReference() {
     const count = await this.prisma.quote.count();
@@ -106,6 +112,18 @@ export class QuotesService {
       });
     }
 
+    // Un devis signé déclenche généralement la génération de facture côté logiciel de facturation.
+    await this.webhooks.dispatch("billing", "quote.signed", {
+      quoteId: quote.id,
+      reference: quote.reference,
+      companyId: quote.companyId,
+      amountHt: quote.amountHt,
+      vatRate: quote.vatRate,
+      amountTtc: quote.amountTtc,
+      signedByName: dto.signedByName,
+      signedAt: signed.signedAt,
+    });
+
     return signed;
   }
 
@@ -113,5 +131,11 @@ export class QuotesService {
     await this.findOne(id);
     await this.prisma.quote.delete({ where: { id } });
     return { success: true };
+  }
+
+  async generatePdf(id: string): Promise<{ buffer: Buffer; filename: string }> {
+    const quote = await this.findOne(id);
+    const buffer = await this.pdfService.quote(quote);
+    return { buffer, filename: `${quote.reference}.pdf` };
   }
 }

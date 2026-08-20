@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { Response } from "express";
 import { QuotesService } from "./quotes.service";
 import { CreateQuoteDto, SignQuoteDto, UpdateQuoteDto } from "./dto/quote.dto";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -23,6 +24,13 @@ export class QuotesController {
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.quotesService.findOne(id);
+  }
+
+  @Get(":id/pdf")
+  async pdf(@Param("id") id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.quotesService.generatePdf(id);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.send(buffer);
   }
 
   @Patch(":id")

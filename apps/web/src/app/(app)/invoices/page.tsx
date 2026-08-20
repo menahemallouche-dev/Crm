@@ -2,10 +2,11 @@
 
 import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Receipt, Upload } from "lucide-react";
+import { Download, Receipt, Upload } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { PageHeader, Card, EmptyState, Skeleton } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
+import { downloadBlob } from "@/lib/download";
 
 const currency = (v?: number | null) =>
   v ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(v) : "—";
@@ -35,6 +36,11 @@ export default function InvoicesPage() {
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["invoices"] }),
   });
+
+  async function downloadPdf(id: string, reference: string) {
+    const res = await apiClient.get(`/invoices/${id}/pdf`, { responseType: "blob" });
+    downloadBlob(res.data, `${reference}.pdf`);
+  }
 
   return (
     <div>
@@ -77,6 +83,7 @@ export default function InvoicesPage() {
                 <th className="px-4 py-3">Montant TTC</th>
                 <th className="px-4 py-3">Échéance</th>
                 <th className="px-4 py-3">Statut</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
@@ -90,6 +97,11 @@ export default function InvoicesPage() {
                   <td className="px-4 py-3 text-ink-muted">{inv.dueAt ? new Date(inv.dueAt).toLocaleDateString("fr-FR") : "—"}</td>
                   <td className="px-4 py-3">
                     <Badge tone={STATUS_TONE[inv.status] ?? "neutral"}>{inv.status}</Badge>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button className="btn-ghost !py-1.5" onClick={() => downloadPdf(inv.id, inv.reference)}>
+                      <Download size={14} /> PDF
+                    </button>
                   </td>
                 </tr>
               ))}

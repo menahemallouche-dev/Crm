@@ -670,8 +670,23 @@ async function main() {
     },
   });
 
+  // ── Client portal demo account ──────────────────────────────────────
+  const freshContact = await prisma.contact.findFirst({ where: { companyId: fresh.id, jobTitle: "Présidente" } });
+  const portalPasswordHash = await argon2.hash("Client1234!");
+  await prisma.portalUser.upsert({
+    where: { email: "client@freshlogistique.fr" },
+    update: {},
+    create: {
+      companyId: fresh.id,
+      contactId: freshContact?.id,
+      email: "client@freshlogistique.fr",
+      passwordHash: portalPasswordHash,
+    },
+  });
+
   console.log("✅ Seed terminé.");
-  console.log("   Connexion démo : demo@gecodis.fr / Demo1234!");
+  console.log("   Connexion démo (staff) : demo@gecodis.fr / Demo1234!");
+  console.log("   Connexion démo (portail client) : client@freshlogistique.fr / Client1234!");
 }
 
 main()

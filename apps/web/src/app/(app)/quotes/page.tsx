@@ -1,10 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FileText } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { PageHeader, Card, EmptyState, Skeleton } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
+import { downloadBlob } from "@/lib/download";
 
 const currency = (v?: number | null) =>
   v ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(v) : "—";
@@ -22,6 +23,11 @@ export default function QuotesPage() {
     queryKey: ["quotes"],
     queryFn: async () => (await apiClient.get("/quotes")).data,
   });
+
+  async function downloadPdf(id: string, reference: string) {
+    const res = await apiClient.get(`/quotes/${id}/pdf`, { responseType: "blob" });
+    downloadBlob(res.data, `${reference}.pdf`);
+  }
 
   return (
     <div>
@@ -47,6 +53,7 @@ export default function QuotesPage() {
                 <th className="px-4 py-3">Montant TTC</th>
                 <th className="px-4 py-3">Statut</th>
                 <th className="px-4 py-3">Validité</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
@@ -61,6 +68,11 @@ export default function QuotesPage() {
                     <Badge tone={STATUS_TONE[q.status] ?? "neutral"}>{q.status}</Badge>
                   </td>
                   <td className="px-4 py-3 text-ink-muted">{q.validUntil ? new Date(q.validUntil).toLocaleDateString("fr-FR") : "—"}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button className="btn-ghost !py-1.5" onClick={() => downloadPdf(q.id, q.reference)}>
+                      <Download size={14} /> PDF
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

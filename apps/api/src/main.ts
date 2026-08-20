@@ -6,7 +6,9 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: true });
+  // rawBody: true preserves the exact request bytes on req.rawBody, needed to
+  // verify inbound webhook HMAC signatures (see webhooks/webhook-receiver.controller.ts).
+  const app = await NestFactory.create(AppModule, { cors: true, rawBody: true });
 
   app.use(helmet());
   app.setGlobalPrefix("api");

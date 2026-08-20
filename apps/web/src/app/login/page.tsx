@@ -1,18 +1,35 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
 import { Sparkles, Truck } from "lucide-react";
 import { useAuthStore } from "@/store/auth-store";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const setSession = useAuthStore((s) => s.setSession);
   const [email, setEmail] = useState("demo@gecodis.fr");
   const [password, setPassword] = useState("Demo1234!");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(searchParams.get("error"));
   const [loading, setLoading] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+
+  useEffect(() => {
+    axios
+      .get("/api/auth/providers")
+      .then((res) => setGoogleEnabled(res.data.googleEnabled))
+      .catch(() => setGoogleEnabled(false));
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -73,6 +90,25 @@ export default function LoginPage() {
           <button type="submit" disabled={loading} className="btn-primary w-full mt-6">
             {loading ? "Connexion…" : "Se connecter"}
           </button>
+
+          {googleEnabled && (
+            <>
+              <div className="flex items-center gap-3 my-4">
+                <div className="h-px flex-1 bg-border-subtle" />
+                <span className="text-xs text-ink-faint">ou</span>
+                <div className="h-px flex-1 bg-border-subtle" />
+              </div>
+              <a href="/api/auth/google" className="btn-secondary w-full">
+                <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+                  <path fill="#4285F4" d="M23.5 12.3c0-.85-.08-1.66-.22-2.44H12v4.62h6.47c-.28 1.5-1.13 2.77-2.4 3.62v3h3.88c2.27-2.09 3.55-5.17 3.55-8.8z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.88-3c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.26v3.1C3.24 21.3 7.28 24 12 24z" />
+                  <path fill="#FBBC05" d="M5.27 14.3A7.2 7.2 0 0 1 4.9 12c0-.8.14-1.57.37-2.3v-3.1H1.26A11.97 11.97 0 0 0 0 12c0 1.93.46 3.76 1.26 5.4l4.01-3.1z" />
+                  <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.58 1.79l3.44-3.44C17.95 1.19 15.24 0 12 0 7.28 0 3.24 2.7 1.26 6.6l4.01 3.1c.95-2.85 3.6-4.95 6.73-4.95z" />
+                </svg>
+                Continuer avec Google
+              </a>
+            </>
+          )}
 
           <p className="text-xs text-ink-faint mt-4 text-center">
             Démo : demo@gecodis.fr / Demo1234! (voir prisma/seed.ts)

@@ -6,6 +6,7 @@ export const QUEUE_ENRICHMENT = "enrichment";
 export const QUEUE_SCORING = "scoring";
 export const QUEUE_REMINDERS = "reminders";
 export const QUEUE_CAMPAIGNS = "campaigns";
+export const QUEUE_WEBHOOKS = "webhooks";
 
 /**
  * Central BullMQ wiring backed by Redis. All background automation
@@ -38,6 +39,7 @@ export const QUEUE_CAMPAIGNS = "campaigns";
       { name: QUEUE_SCORING },
       { name: QUEUE_REMINDERS },
       { name: QUEUE_CAMPAIGNS },
+      { name: QUEUE_WEBHOOKS },
     ),
   ],
   exports: [BullModule],

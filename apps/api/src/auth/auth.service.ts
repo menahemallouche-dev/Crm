@@ -6,6 +6,7 @@ import { authenticator } from "otplib";
 import { PrismaService } from "../prisma/prisma.service";
 import { LoginDto, RegisterDto } from "./dto/auth.dto";
 import { JwtPayload } from "./types";
+import { GoogleProfile } from "./strategies/google.strategy";
 
 @Injectable()
 export class AuthService {
@@ -64,6 +65,30 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException("Refresh token invalide ou expiré");
     }
+  }
+
+  /** Finds or provisions a User from a verified Google profile, then issues normal JWT tokens. */
+  async loginWithGoogle(profile: GoogleProfile) {
+    if (!profile.email) throw new BadRequestException("Le compte Google ne fournit pas d'adresse email");
+
+    let user = await this.prisma.user.findUnique({ where: { email: profile.email } });
+    if (!user) {
+      // No password is ever set for Google-provisioned accounts — a random hash blocks password login for them.
+      const randomPasswordHash = await argon2.hash(`${Date.now()}-${Math.random()}`);
+      user = await this.prisma.user.create({
+        data: {
+          email: profile.email,
+          passwordHash: randomPasswordHash,
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          avatarUrl: profile.avatarUrl,
+          role: "COMMERCIAL",
+        },
+      });
+    }
+
+    await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    return this.buildAuthResponse(user);
   }
 
   async generateMfaSecret(userId: string) {

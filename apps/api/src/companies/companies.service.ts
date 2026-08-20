@@ -5,6 +5,8 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { QUEUE_ENRICHMENT } from "../queue/queue.module";
 import { EnrichmentService } from "../enrichment/enrichment.service";
+import { ElasticsearchService } from "../search/elasticsearch.service";
+import { WebhookDispatcherService } from "../webhooks/webhook-dispatcher.service";
 import { PaginatedResult, paginate } from "../common/dto/pagination.dto";
 import { AddRealEstateAssetDto, CreateCompanyDto, QueryCompaniesDto, UpdateCompanyDto } from "./dto/company.dto";
 
@@ -15,6 +17,8 @@ export class CompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentService: EnrichmentService,
+    private readonly elasticsearch: ElasticsearchService,
+    private readonly webhooks: WebhookDispatcherService,
     @InjectQueue(QUEUE_ENRICHMENT) private readonly enrichmentQueue: Queue,
   ) {}
 
@@ -30,6 +34,18 @@ export class CompaniesService {
 
     await this.prisma.auditLog.create({
       data: { userId: actingUserId, companyId: company.id, action: "CREATE", entityType: "Company", entityId: company.id },
+    });
+    await this.elasticsearch.indexCompany(company);
+    // Syncs the new customer master data to the connected billing/ERP software, if configured.
+    await this.webhooks.dispatch("billing", "company.created", {
+      companyId: company.id,
+      name: company.name,
+      siren: company.siren,
+      address: company.address,
+      city: company.city,
+      postalCode: company.postalCode,
+      email: company.email,
+      vatNumber: company.vatNumber,
     });
 
     if (!skipAutoEnrichment) {
@@ -132,6 +148,7 @@ export class CompaniesService {
       data: { userId: actingUserId, companyId: id, action: "UPDATE", entityType: "Company", entityId: id },
     });
     // Manual edits can change NAF/activity/revenue — refresh AI scoring to stay consistent.
+    // rescoreCompany() re-indexes into Elasticsearch itself once the refreshed record is saved.
     await this.enrichmentService.rescoreCompany(id);
     return company;
   }
@@ -139,6 +156,7 @@ export class CompaniesService {
   async remove(id: string) {
     await this.findOne(id);
     await this.prisma.company.delete({ where: { id } });
+    await this.elasticsearch.deleteCompany(id);
     return { success: true };
   }
 

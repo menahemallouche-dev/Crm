@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { PdfService } from "../pdf/pdf.service";
 import { CreateInvoiceDto, UpdateInvoiceDto } from "./dto/invoice.dto";
 import { extractInvoiceData } from "./pdf-extraction.util";
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pdfService: PdfService,
+  ) {}
 
   private async generateReference() {
     const count = await this.prisma.invoice.count();
@@ -83,5 +87,11 @@ export class InvoicesService {
     await this.findOne(id);
     await this.prisma.invoice.delete({ where: { id } });
     return { success: true };
+  }
+
+  async generatePdf(id: string): Promise<{ buffer: Buffer; filename: string }> {
+    const invoice = await this.findOne(id);
+    const buffer = await this.pdfService.invoice(invoice);
+    return { buffer, filename: `${invoice.reference}.pdf` };
   }
 }

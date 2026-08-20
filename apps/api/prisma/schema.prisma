@@ -167,6 +167,7 @@ model Company {
   realEstateAssets CompanyRealEstateAsset[]
   documents       Document[]
   auditLogs       AuditLog[]
+  portalUsers     PortalUser[]
 
   @@index([name])
   @@index([nafCode])
@@ -269,6 +270,7 @@ model Contact {
   activities    Activity[]
   deals         Deal[]
   campaignRecipients CampaignRecipient[]
+  portalUser    PortalUser?
 
   @@index([companyId])
   @@index([lastName])
@@ -713,4 +715,56 @@ model SavedSearch {
   ownerUserId String?
   filters   Json
   createdAt DateTime @default(now())
+}
+
+// ───────────────────────────── CONNECTEURS EXTERNES (ERP/WMS/facturation) ─
+
+enum ConnectorDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum ConnectorEventStatus {
+  RECEIVED
+  SENT
+  DELIVERED
+  PROCESSED
+  FAILED
+}
+
+/// Audit trail for every webhook exchanged with the billing software / WMS connectors.
+model ConnectorEventLog {
+  id          String               @id @default(cuid())
+  connector   String               // "billing" | "wms"
+  direction   ConnectorDirection
+  eventType   String
+  payload     Json
+  status      ConnectorEventStatus
+  errorMessage String?
+  createdAt   DateTime             @default(now())
+
+  @@index([connector, direction])
+  @@index([eventType])
+}
+
+// ───────────────────────────── PORTAIL CLIENT (self-service) ───────────
+
+/// A client-side login, scoped to a single Company, giving self-service
+/// access to that company's quotes/invoices/contracts/opportunities.
+/// Deliberately a separate identity space from `User` (staff) — see
+/// portal/ module: distinct JWT secret, guard and strategy so a portal
+/// token can never be used against internal CRM endpoints or vice versa.
+model PortalUser {
+  id           String    @id @default(cuid())
+  companyId    String
+  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactId    String?   @unique
+  contact      Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  email        String    @unique
+  passwordHash String
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([companyId])
 }

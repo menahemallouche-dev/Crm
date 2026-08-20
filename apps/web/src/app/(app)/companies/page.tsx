@@ -3,11 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Building2, Upload, Download } from "lucide-react";
+import { Plus, Building2, Download, FileText } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { PageHeader, Card, EmptyState, Skeleton } from "@/components/ui/misc";
 import { PriorityBadge, PotentialBadge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
+import { downloadBlob } from "@/lib/download";
 
 const currency = (v?: number | null) =>
   v ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v) : "—";
@@ -35,12 +36,12 @@ export default function CompaniesPage() {
 
   async function exportCsv() {
     const res = await apiClient.post("/import-export/companies/export", {}, { responseType: "blob" });
-    const url = URL.createObjectURL(res.data);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "entreprises-gecodis.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(res.data, "entreprises-gecodis.csv");
+  }
+
+  async function exportPdf() {
+    const res = await apiClient.post("/import-export/companies/export-pdf", {}, { responseType: "blob" });
+    downloadBlob(res.data, "entreprises-gecodis.pdf");
   }
 
   return (
@@ -51,7 +52,10 @@ export default function CompaniesPage() {
         actions={
           <>
             <button className="btn-secondary" onClick={exportCsv}>
-              <Download size={16} /> Exporter
+              <Download size={16} /> CSV
+            </button>
+            <button className="btn-secondary" onClick={exportPdf}>
+              <FileText size={16} /> PDF
             </button>
             <button className="btn-primary" onClick={() => setModalOpen(true)}>
               <Plus size={16} /> Nouvelle entreprise

@@ -3,6 +3,7 @@ import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
 import { PrismaService } from "../prisma/prisma.service";
 import { CompaniesService } from "../companies/companies.service";
+import { PdfService } from "../pdf/pdf.service";
 
 const COMPANY_EXPORT_COLUMNS = [
   "name",
@@ -38,6 +39,7 @@ export class ImportExportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly companiesService: CompaniesService,
+    private readonly pdfService: PdfService,
   ) {}
 
   /** Imports companies from a CSV (or Excel-exported CSV) buffer. One company per row; unknown columns ignored. */
@@ -92,5 +94,13 @@ export class ImportExportService {
     });
     const rows = companies.map((c) => Object.fromEntries(COMPANY_EXPORT_COLUMNS.map((col) => [col, (c as any)[col] ?? ""])));
     return stringify(rows, { header: true, columns: COMPANY_EXPORT_COLUMNS as unknown as string[] });
+  }
+
+  async exportCompaniesPdf(companyIds?: string[]): Promise<Buffer> {
+    const companies = await this.prisma.company.findMany({
+      where: companyIds?.length ? { id: { in: companyIds } } : undefined,
+      orderBy: { name: "asc" },
+    });
+    return this.pdfService.companiesList(companies);
   }
 }

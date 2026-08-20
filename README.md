@@ -12,11 +12,12 @@ Design premium inspiré HubSpot / Salesforce / Monday / Linear — mode sombre, 
 | Frontend | Next.js 14 (App Router) + React + TypeScript + Tailwind |
 | Base de données | PostgreSQL |
 | ORM | Prisma |
-| Auth | JWT (access + refresh) + MFA TOTP (otplib) — OAuth Google scaffolded |
+| Auth | JWT (access + refresh) + MFA TOTP (otplib) + OAuth Google — auth séparée pour le portail client |
 | IA | OpenAI API, avec repli heuristique déterministe si pas de clé |
 | Files d'attente | Redis + BullMQ |
 | Emails | Adaptateur console / Resend / SendGrid / SMTP |
-| Recherche | PostgreSQL full-text (par défaut) — extension Elasticsearch documentée |
+| Recherche | PostgreSQL full-text (par défaut) ou Elasticsearch (`SEARCH_PROVIDER=elasticsearch`) |
+| PDF | Génération native (pdfkit) — devis, factures, listes, classements |
 | Monorepo | npm workspaces (`apps/api`, `apps/web`, `packages/shared`) |
 
 ## Démarrage rapide
@@ -34,8 +35,8 @@ npm run dev
 ```
 
 - API : http://localhost:4000/api — Swagger : http://localhost:4000/api/docs
-- Web : http://localhost:3000
-- Connexion démo (créée par le seed) : **demo@gecodis.fr / Demo1234!**
+- Web (staff) : http://localhost:3000 — connexion démo : **demo@gecodis.fr / Demo1234!**
+- Portail client : http://localhost:3000/portal/login — connexion démo : **client@freshlogistique.fr / Client1234!**
 
 Sans aucune clé API externe, l'application est **entièrement fonctionnelle en mode démo** : enrichissement, scoring IA, assistant commercial et emailing utilisent des implémentations de repli déterministes documentées dans `.env.example`.
 
@@ -56,6 +57,12 @@ Sans aucune clé API externe, l'application est **entièrement fonctionnelle en 
 13. **Import / Export** — CSV en masse (compatible Excel), export à la demande.
 14. **Immobilier logistique** — module "Opportunités immobilières" (location/vente) avec matching automatique des prospects intéressés.
 15. **Contrats** — suivi des contrats clients, échéances, alertes de renouvellement.
+16. **Portail client** — espace self-service séparé (`/portal`) : le client consulte ses devis (et les signe électroniquement), ses factures, ses contrats et le suivi de ses dossiers. Comptes gérés par le staff depuis l'onglet « Portail client » de chaque fiche entreprise.
+17. **Connecteurs ERP / facturation / WMS** — webhooks sortants signés HMAC (création client, devis signé, opportunité gagnée) et entrants (facture payée/créée côté facturation, alerte stock/expédition côté WMS), avec journal d'audit complet (`GET /api/webhooks/logs`).
+18. **Export PDF natif** — entreprises, devis, factures et classements de rentabilité, générés nativement (pdfkit, aucune dépendance navigateur).
+19. **Recherche Elasticsearch** — bascule optionnelle (`SEARCH_PROVIDER=elasticsearch`) avec indexation automatique et repli transparent vers PostgreSQL si le nœud est indisponible.
+20. **OAuth Google** — connexion staff via Google, en plus de l'email/mot de passe.
+21. **Enrichissement LinkedIn** — via une API tierce conforme (type Proxycurl), en plus d'INSEE/Pappers/Google Places.
 
 ## IA — comment ça marche sans clé OpenAI
 
@@ -63,18 +70,24 @@ Chaque service IA (`apps/api/src/ai/`) suit le même principe : une heuristique 
 
 ## Enrichissement automatique
 
-`apps/api/src/enrichment/providers/` implémente une interface commune `CompanyDataProvider` pour INSEE Sirene, Pappers et Google Places — chacun s'active automatiquement dès qu'une clé API est renseignée dans `.env`, sans changement de code. Un provider de repli (`demo-fallback.provider.ts`) garantit un résultat même sans aucune clé. Les appels sont mis en file (BullMQ) dès la création d'une entreprise ; en l'absence de Redis, l'enrichissement bascule automatiquement en exécution synchrone.
+`apps/api/src/enrichment/providers/` implémente une interface commune `CompanyDataProvider` pour INSEE Sirene, Pappers, Google Places et LinkedIn (via une API tierce conforme type Proxycurl — LinkedIn n'expose pas d'API publique de lookup société, et le scraping direct du site viole ses CGU) — chacun s'active automatiquement dès qu'une clé API est renseignée dans `.env`, sans changement de code. Un provider de repli (`demo-fallback.provider.ts`) garantit un résultat même sans aucune clé. Les appels sont mis en file (BullMQ) dès la création d'une entreprise ; en l'absence de Redis, l'enrichissement bascule automatiquement en exécution synchrone.
+
+## Portail client
+
+`apps/api/src/portal/` — identité et JWT (`PORTAL_JWT_SECRET`) entièrement séparés des comptes staff : un jeton portail ne peut authentifier aucune route interne, et réciproquement (vérifié par test). Le staff invite un client depuis l'onglet « Portail client » d'une fiche entreprise (`POST /api/companies/:id/portal-users`) ; le client se connecte sur `/portal/login` et n'accède qu'aux données de sa propre entreprise (devis avec signature électronique, factures, contrats, suivi des opportunités en langage client).
+
+## Connecteurs ERP / facturation / WMS
+
+`apps/api/src/webhooks/` — sortant : `WebhookDispatcherService.dispatch()` met en file (BullMQ, retry exponentiel) un événement signé HMAC-SHA256 vers `BILLING_SOFTWARE_WEBHOOK_URL` / `WMS_WEBHOOK_URL` (`company.created`, `quote.signed`, `deal.won`). Entrant : `POST /api/webhooks/billing` et `POST /api/webhooks/wms`, signature vérifiée sur les octets bruts de la requête (`invoice.paid`/`invoice.created` mettent à jour les factures, `warehouse.threshold_alert`/`shipment.completed` créent tâche/activité). Chaque échange est journalisé dans `ConnectorEventLog`, consultable via `GET /api/webhooks/logs`.
 
 ## Roadmap / limites connues
 
-Ce dépôt livre une base solide et fonctionnelle de bout en bout plutôt qu'une simulation : le schéma Prisma, les 20+ modules API et les pages web ci-dessus sont réels et testés (migration + seed + build validés). Les points suivants sont volontairement laissés en extension pour une v2 :
+Ce dépôt livre une base fonctionnelle de bout en bout plutôt qu'une simulation : schéma Prisma, 25+ modules API et pages web sont réels et testés (migrations + seed + build + appels HTTP réels validés, y compris signature de webhook et isolation des jetons portail). Points volontairement laissés en extension pour une v2 :
 
-- **Portail client** (accès self-service pour les clients : devis, factures, suivi) — non démarré.
-- **Connecteurs ERP / logiciel de facturation / WMS** — points d'entrée prévus dans `.env.example` (`BILLING_SOFTWARE_WEBHOOK_URL`, `WMS_WEBHOOK_URL`) mais webhooks non implémentés.
-- **Recherche Elasticsearch** — `docker-compose.yml` provisionne le nœud (`--profile search`) et `SEARCH_PROVIDER` est lu, mais le provider ES lui-même n'est pas encore codé (repli PostgreSQL pleinement fonctionnel).
-- **Export PDF / Excel natif** — l'export CSV (compatible Excel) est complet ; un export PDF dédié reste à ajouter.
-- **OAuth Google / MFA** — JWT + TOTP (MFA) sont fonctionnels ; le flux OAuth Google est configuré côté variables d'environnement mais le callback n'est pas encore branché.
-- **LinkedIn / réseaux sociaux** — l'enrichissement LinkedIn nécessite un fournisseur tiers (scraping soumis à conditions d'utilisation) ; la clé est prévue (`LINKEDIN_SCRAPER_API_KEY`) mais aucun provider n'est branché par défaut.
+- **Export Excel natif (.xlsx)** — l'export CSV (déjà compatible Excel) et l'export PDF sont complets ; un export `.xlsx` avec mise en forme reste à ajouter.
+- **Connecteurs ERP/WMS** — le contrat webhook (signature, événements, journal) est fonctionnel des deux côtés, mais n'a été testé qu'en simulant l'appel HTTP ; l'intégration avec un logiciel de facturation ou un WMS réel nécessitera d'adapter le format d'événement à celui de l'outil choisi.
+- **Elasticsearch** — le provider (indexation + recherche + repli automatique) est implémenté et compile, mais n'a pas pu être testé contre un nœud ES réel dans cet environnement (le mode par défaut, PostgreSQL, est lui pleinement validé).
+- **Signature électronique** — le flux (devis → signature → transformation en client, accessible côté CRM comme côté portail) est fonctionnel de bout en bout, mais avec un fournisseur *mock* (`QuotesService.sign()`) ; brancher DocuSign/Yousign consiste à remplacer cette méthode par un appel à leur API sans changer le reste du flux.
 
 ## Structure du repo
 
@@ -90,6 +103,11 @@ docker-compose.yml   Postgres, Redis, Elasticsearch (optionnel), Mailhog (dev)
 ## Tests effectués
 
 - `tsc --noEmit` et `nest build` : ✅ sans erreur sur l'API.
-- `next build` : ✅ sans erreur sur le web (16 routes générées).
-- Migration Prisma + seed exécutés sur une base PostgreSQL réelle : ✅.
-- API démarrée et testée en conditions réelles (login JWT, dashboard, Kanban, assistant IA sur les 8 questions de l'énoncé, rentabilité, matching immobilier) : ✅.
+- `next build` : ✅ sans erreur sur le web (23 routes générées, staff + portail).
+- Migrations Prisma + seed exécutés sur une base PostgreSQL réelle : ✅.
+- API démarrée et testée en conditions réelles :
+  - login JWT staff, dashboard, Kanban, assistant IA sur les 8 questions de l'énoncé, rentabilité, matching immobilier ;
+  - export PDF (entreprises, devis, classement de rentabilité) — fichiers PDF valides générés et vérifiés ;
+  - portail client : connexion, isolation vérifiée (un jeton portail est rejeté avec 401 sur une route staff et réciproquement), consultation devis/factures/contrats/suivi, signature électronique d'un devis, invitation d'un compte par le staff ;
+  - webhooks entrants : requête rejetée sans signature (403), rejetée avec signature invalide (403), acceptée et traitée avec la bonne signature HMAC (facture marquée payée), journalisée dans `ConnectorEventLog` ;
+  - recherche : repli PostgreSQL fonctionnel, endpoint de réindexation Elasticsearch testé (no-op hors mode ES, comme attendu).

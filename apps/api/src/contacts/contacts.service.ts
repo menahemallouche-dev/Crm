@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ScoringService } from "../ai/scoring.service";
+import { ElasticsearchService } from "../search/elasticsearch.service";
 import { PaginatedResult, paginate } from "../common/dto/pagination.dto";
 import { CreateContactDto, QueryContactsDto, UpdateContactDto } from "./dto/contact.dto";
 
@@ -10,13 +11,14 @@ export class ContactsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scoring: ScoringService,
+    private readonly elasticsearch: ElasticsearchService,
   ) {}
 
   async create(dto: CreateContactDto) {
     const company = await this.prisma.company.findUniqueOrThrow({ where: { id: dto.companyId } });
     const classification = await this.scoring.classifyContactRole({ jobTitle: dto.jobTitle, companyName: company.name });
     const { birthday, ...rest } = dto;
-    return this.prisma.contact.create({
+    const contact = await this.prisma.contact.create({
       data: {
         ...rest,
         birthday: birthday ? new Date(birthday) : undefined,
@@ -25,6 +27,8 @@ export class ContactsService {
         aiClassifiedAt: new Date(),
       },
     });
+    await this.elasticsearch.indexContact(contact, company.name);
+    return contact;
   }
 
   async findAll(query: QueryContactsDto): Promise<PaginatedResult<any>> {
@@ -84,7 +88,7 @@ export class ContactsService {
       : null;
 
     const { birthday, ...rest } = dto;
-    return this.prisma.contact.update({
+    const updated = await this.prisma.contact.update({
       where: { id },
       data: {
         ...rest,
@@ -94,11 +98,14 @@ export class ContactsService {
           : {}),
       },
     });
+    await this.elasticsearch.indexContact(updated, existing.company.name);
+    return updated;
   }
 
   async remove(id: string) {
     await this.findOne(id);
     await this.prisma.contact.delete({ where: { id } });
+    await this.elasticsearch.deleteContact(id);
     return { success: true };
   }
 
@@ -108,10 +115,12 @@ export class ContactsService {
       jobTitle: contact.jobTitle,
       companyName: contact.company.name,
     });
-    return this.prisma.contact.update({
+    const updated = await this.prisma.contact.update({
       where: { id },
       data: { aiDecisionRole: classification.role, aiDecisionPower: classification.power, aiClassifiedAt: new Date() },
     });
+    await this.elasticsearch.indexContact(updated, contact.company.name);
+    return updated;
   }
 
   async upcomingBirthdays(withinDays = 30) {

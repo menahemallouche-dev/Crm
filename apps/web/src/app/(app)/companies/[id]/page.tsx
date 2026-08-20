@@ -14,12 +14,18 @@ import {
   Warehouse,
   Sparkles,
   ExternalLink,
+  KeyRound,
+  Plus,
+  Ban,
+  CheckCircle2,
+  Trash2,
 } from "lucide-react";
 import { NEEDS_SCORE_LABELS, NeedsScoreKey } from "@gecodis/shared";
 import { apiClient } from "@/lib/api-client";
-import { Card, Skeleton } from "@/components/ui/misc";
+import { Card, Skeleton, EmptyState } from "@/components/ui/misc";
 import { Badge, PotentialBadge, PriorityBadge } from "@/components/ui/badge";
 import { ScoreBar } from "@/components/companies/score-bar";
+import { Modal } from "@/components/ui/modal";
 import { clsx } from "clsx";
 
 const TABS = [
@@ -31,6 +37,7 @@ const TABS = [
   "Factures",
   "Rentabilité",
   "Immobilier",
+  "Portail client",
 ] as const;
 
 const currency = (v?: number | null) =>
@@ -51,6 +58,35 @@ export default function CompanyDetailPage() {
   const enrich = useMutation({
     mutationFn: async () => (await apiClient.post(`/companies/${id}/enrich`)).data,
     onSuccess: () => setTimeout(() => queryClient.invalidateQueries({ queryKey: ["company", id] }), 2000),
+  });
+
+  const [portalModalOpen, setPortalModalOpen] = useState(false);
+  const [portalForm, setPortalForm] = useState({ email: "", password: "" });
+
+  const { data: portalUsers } = useQuery({
+    queryKey: ["portal-users", id],
+    queryFn: async () => (await apiClient.get(`/companies/${id}/portal-users`)).data,
+    enabled: tab === "Portail client",
+  });
+
+  const invitePortalUser = useMutation({
+    mutationFn: async () => (await apiClient.post(`/companies/${id}/portal-users`, portalForm)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["portal-users", id] });
+      setPortalModalOpen(false);
+      setPortalForm({ email: "", password: "" });
+    },
+  });
+
+  const togglePortalUser = useMutation({
+    mutationFn: async ({ userId, activate }: { userId: string; activate: boolean }) =>
+      (await apiClient.patch(`/companies/${id}/portal-users/${userId}/${activate ? "activate" : "deactivate"}`)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["portal-users", id] }),
+  });
+
+  const removePortalUser = useMutation({
+    mutationFn: async (userId: string) => (await apiClient.delete(`/companies/${id}/portal-users/${userId}`)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["portal-users", id] }),
   });
 
   if (isLoading || !company) {
@@ -368,6 +404,104 @@ export default function CompanyDetailPage() {
           {!company.realEstateAssets?.length && <p className="text-sm text-ink-faint">Aucun actif immobilier détecté.</p>}
         </div>
       )}
+
+      {tab === "Portail client" && (
+        <Card className="p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-4 border-b border-border-subtle">
+            <div>
+              <p className="text-sm font-medium text-ink flex items-center gap-2">
+                <KeyRound size={15} className="text-ink-faint" /> Comptes du portail client
+              </p>
+              <p className="text-xs text-ink-faint mt-0.5">Donnez à ce client un accès self-service à ses devis, factures et contrats.</p>
+            </div>
+            <button className="btn-primary" onClick={() => setPortalModalOpen(true)}>
+              <Plus size={16} /> Inviter
+            </button>
+          </div>
+
+          {!portalUsers?.length ? (
+            <div className="p-8">
+              <EmptyState title="Aucun accès portail" description="Créez un accès pour que ce client suive ses devis et factures en ligne." />
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-ink-faint uppercase border-b border-border-subtle">
+                  <th className="px-4 py-3">Email</th>
+                  <th className="px-4 py-3">Contact lié</th>
+                  <th className="px-4 py-3">Dernière connexion</th>
+                  <th className="px-4 py-3">Statut</th>
+                  <th className="px-4 py-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {portalUsers.map((u: any) => (
+                  <tr key={u.id} className="border-b border-border-subtle last:border-0 hover:bg-canvas">
+                    <td className="px-4 py-3 font-medium text-ink">{u.email}</td>
+                    <td className="px-4 py-3 text-ink-muted">
+                      {u.contact ? `${u.contact.firstName} ${u.contact.lastName}` : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-ink-muted">
+                      {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString("fr-FR") : "Jamais connecté"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone={u.isActive ? "success" : "neutral"}>{u.isActive ? "Actif" : "Désactivé"}</Badge>
+                    </td>
+                    <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+                      <button
+                        className="btn-ghost !py-1.5"
+                        onClick={() => togglePortalUser.mutate({ userId: u.id, activate: !u.isActive })}
+                        title={u.isActive ? "Désactiver" : "Activer"}
+                      >
+                        {u.isActive ? <Ban size={14} /> : <CheckCircle2 size={14} />}
+                      </button>
+                      <button className="btn-ghost !py-1.5" onClick={() => removePortalUser.mutate(u.id)} title="Supprimer">
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
+
+      <Modal open={portalModalOpen} onClose={() => setPortalModalOpen(false)} title="Inviter un accès au portail client">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            invitePortalUser.mutate();
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <label className="text-sm font-medium text-ink">Email</label>
+            <input
+              className="input mt-1"
+              type="email"
+              required
+              value={portalForm.email}
+              onChange={(e) => setPortalForm({ ...portalForm, email: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-ink">Mot de passe provisoire</label>
+            <input
+              className="input mt-1"
+              type="text"
+              required
+              minLength={8}
+              value={portalForm.password}
+              onChange={(e) => setPortalForm({ ...portalForm, password: e.target.value })}
+            />
+            <p className="text-xs text-ink-faint mt-1">Communiquez ce mot de passe au client par un canal sécurisé.</p>
+          </div>
+          <button type="submit" className="btn-primary w-full" disabled={invitePortalUser.isPending}>
+            {invitePortalUser.isPending ? "Création…" : "Créer l'accès"}
+          </button>
+        </form>
+      </Modal>
     </div>
   );
 }

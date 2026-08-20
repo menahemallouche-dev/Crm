@@ -24,4 +24,14 @@ export class ImportExportController {
     });
     res.send(csv);
   }
+
+  @Post("companies/export-pdf")
+  async exportCompaniesPdf(@Body("companyIds") companyIds: string[] | undefined, @Res() res: Response) {
+    const pdf = await this.importExportService.exportCompaniesPdf(companyIds);
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="entreprises-gecodis-${new Date().toISOString().slice(0, 10)}.pdf"`,
+    });
+    res.send(pdf);
+  }
 }

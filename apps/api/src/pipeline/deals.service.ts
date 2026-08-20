@@ -2,20 +2,28 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { PipelineStage } from "@prisma/client";
 import { PIPELINE_STAGE_ORDER } from "@gecodis/shared";
 import { PrismaService } from "../prisma/prisma.service";
+import { ElasticsearchService } from "../search/elasticsearch.service";
+import { WebhookDispatcherService } from "../webhooks/webhook-dispatcher.service";
 import { CreateDealDto, MoveStageDto, QueryDealsDto, UpdateDealDto } from "./dto/deal.dto";
 
 @Injectable()
 export class DealsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly elasticsearch: ElasticsearchService,
+    private readonly webhooks: WebhookDispatcherService,
+  ) {}
 
   async create(dto: CreateDealDto) {
     const { nextActionDate, ...rest } = dto;
     const deal = await this.prisma.deal.create({
       data: { ...rest, nextActionDate: nextActionDate ? new Date(nextActionDate) : undefined },
+      include: { company: { select: { name: true } } },
     });
     await this.prisma.dealStageEvent.create({
       data: { dealId: deal.id, stage: deal.stage, comment: "Opportunité créée" },
     });
+    await this.elasticsearch.indexDeal(deal, deal.company.name);
     return deal;
   }
 
@@ -63,10 +71,13 @@ export class DealsService {
   async update(id: string, dto: UpdateDealDto) {
     await this.findOne(id);
     const { nextActionDate, ...rest } = dto;
-    return this.prisma.deal.update({
+    const updated = await this.prisma.deal.update({
       where: { id },
       data: { ...rest, nextActionDate: nextActionDate ? new Date(nextActionDate) : undefined },
+      include: { company: { select: { name: true } } },
     });
+    await this.elasticsearch.indexDeal(updated, updated.company.name);
+    return updated;
   }
 
   async remove(id: string) {
@@ -94,6 +105,7 @@ export class DealsService {
         lostAt: stage === "PERDU" ? new Date() : deal.lostAt,
       },
     });
+    await this.elasticsearch.indexDeal(updated, deal.company.name);
 
     await this.prisma.dealStageEvent.create({
       data: {
@@ -105,6 +117,18 @@ export class DealsService {
         nextActionDate,
       },
     });
+
+    // Une opportunité gagnée peut nécessiter un provisionnement côté WMS (compte client, allocation d'entrepôt…).
+    if (stage === "GAGNE" && deal.stage !== "GAGNE") {
+      await this.webhooks.dispatch("wms", "deal.won", {
+        dealId: deal.id,
+        title: deal.title,
+        companyId: deal.companyId,
+        companyName: deal.company.name,
+        estimatedValue: deal.estimatedValue,
+        wonAt: updated.wonAt,
+      });
+    }
 
     if (nextActionDate && deal.autoReminderEnabled) {
       await this.prisma.taskItem.create({

@@ -3,9 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { FileText } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { PageHeader, Card, EmptyState, Skeleton } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
+import { downloadBlob } from "@/lib/download";
 
 const currency = (v?: number | null) =>
   v || v === 0 ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v) : "—";
@@ -23,9 +25,22 @@ export default function ProfitabilityPage() {
     queryFn: async () => (await apiClient.get("/profitability/rankings", { params: { type, limit: 100 } })).data,
   });
 
+  async function exportPdf() {
+    const res = await apiClient.get("/profitability/rankings/pdf", { params: { type, limit: 100 }, responseType: "blob" });
+    downloadBlob(res.data, `rentabilite-${type}.pdf`);
+  }
+
   return (
     <div>
-      <PageHeader title="Rentabilité client" description="CA, coûts logistiques, marge et classement automatique — Top 100 clients." />
+      <PageHeader
+        title="Rentabilité client"
+        description="CA, coûts logistiques, marge et classement automatique — Top 100 clients."
+        actions={
+          <button className="btn-secondary" onClick={exportPdf}>
+            <FileText size={16} /> Exporter PDF
+          </button>
+        }
+      />
 
       <div className="flex gap-2 mb-4">
         {TABS.map((t) => (

@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiTags } from "@nestjs/swagger";
+import { Response } from "express";
 import { InvoicesService } from "./invoices.service";
 import { CreateInvoiceDto, UpdateInvoiceDto } from "./dto/invoice.dto";
 
@@ -32,6 +33,13 @@ export class InvoicesController {
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.invoicesService.findOne(id);
+  }
+
+  @Get(":id/pdf")
+  async pdf(@Param("id") id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.invoicesService.generatePdf(id);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"` });
+    res.send(buffer);
   }
 
   @Patch(":id")

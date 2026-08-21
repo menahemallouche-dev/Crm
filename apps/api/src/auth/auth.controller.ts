@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { ConfigService } from "@nestjs/config";
 import { Request, Response } from "express";
@@ -47,12 +47,24 @@ export class AuthController {
     };
   }
 
+  /** Authenticated staff member wants to explicitly attach their Google account (Paramètres → "Lier mon compte Google"). */
+  @Post("google/link-ticket")
+  createGoogleLinkTicket(@CurrentUser() user: AuthenticatedUser) {
+    return { ticket: this.authService.createGoogleLinkTicket(user.id) };
+  }
+
+  @Post("google/unlink")
+  unlinkGoogle(@CurrentUser() user: AuthenticatedUser) {
+    return this.authService.unlinkGoogle(user.id);
+  }
+
   @Public()
   @UseGuards(GoogleAuthGuard)
   @Get("google")
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  googleLogin() {
+  googleLogin(@Query("linkTicket") _linkTicket?: string) {
     // GoogleAuthGuard redirects to Google's consent screen — this body never runs.
+    // The `linkTicket` query param (if any) is relayed via OAuth `state` — see GoogleAuthGuard.getAuthenticateOptions.
   }
 
   @Public()
@@ -60,12 +72,15 @@ export class AuthController {
   @Get("google/callback")
   async googleCallback(@Req() req: Request, @Res() res: Response) {
     const appUrl = this.config.get<string>("APP_URL") ?? "http://localhost:3000";
+    // Google echoes our `state` param back as a plain query string param on the callback.
+    const linkTicket = typeof req.query.state === "string" ? req.query.state : undefined;
     try {
-      const session = await this.authService.loginWithGoogle(req.user as GoogleProfile);
+      const session = await this.authService.loginWithGoogle(req.user as GoogleProfile, linkTicket);
       const params = new URLSearchParams({ accessToken: session.accessToken, refreshToken: session.refreshToken });
       res.redirect(`${appUrl}/oauth-callback?${params.toString()}`);
     } catch (error) {
-      res.redirect(`${appUrl}/login?error=${encodeURIComponent((error as Error).message)}`);
+      const redirectTo = linkTicket ? "/settings" : "/login";
+      res.redirect(`${appUrl}${redirectTo}?error=${encodeURIComponent((error as Error).message)}`);
     }
   }
 

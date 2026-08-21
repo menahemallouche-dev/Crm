@@ -22,4 +22,11 @@ export class GoogleAuthGuard extends AuthGuard("google") {
     }
     return super.canActivate(context) as boolean | Promise<boolean>;
   }
+
+  /** Relays ?linkTicket=... (see GoogleLinkTicketService) through Google as the OAuth `state` param, so the callback can read it back. */
+  getAuthenticateOptions(context: ExecutionContext) {
+    const req = context.switchToHttp().getRequest();
+    const linkTicket = req.query?.linkTicket;
+    return typeof linkTicket === "string" ? { state: linkTicket } : undefined;
+  }
 }

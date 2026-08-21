@@ -7,6 +7,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { LoginDto, RegisterDto } from "./dto/auth.dto";
 import { JwtPayload } from "./types";
 import { GoogleProfile } from "./strategies/google.strategy";
+import { GoogleLinkTicketService } from "./google-link-ticket.service";
 
 @Injectable()
 export class AuthService {
@@ -14,6 +15,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly googleLinkTickets: GoogleLinkTicketService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -67,28 +69,80 @@ export class AuthService {
     }
   }
 
-  /** Finds or provisions a User from a verified Google profile, then issues normal JWT tokens. */
-  async loginWithGoogle(profile: GoogleProfile) {
+  /**
+   * Finds, links, or provisions a User from a verified Google profile, then
+   * issues normal JWT tokens. Three cases, in order:
+   *
+   * 1. `linkTicket` present (from an authenticated "Lier mon compte Google"
+   *    click — see google-link-ticket.service.ts): attach this Google
+   *    identity to that specific, already-logged-in account. Explicit and
+   *    unambiguous — doesn't rely on email matching.
+   * 2. No ticket, but `googleId` already linked to a User: plain login.
+   * 3. No ticket, no existing link, but the Google email matches an
+   *    existing password account: link automatically (Google verifies the
+   *    email, so this is safe) and log in — this is what makes "sign in
+   *    with Google" work transparently for staff who registered with a
+   *    password first.
+   * 4. Nothing matches: provision a brand new account.
+   */
+  async loginWithGoogle(profile: GoogleProfile, linkTicket?: string) {
     if (!profile.email) throw new BadRequestException("Le compte Google ne fournit pas d'adresse email");
 
-    let user = await this.prisma.user.findUnique({ where: { email: profile.email } });
-    if (!user) {
-      // No password is ever set for Google-provisioned accounts — a random hash blocks password login for them.
-      const randomPasswordHash = await argon2.hash(`${Date.now()}-${Math.random()}`);
-      user = await this.prisma.user.create({
-        data: {
-          email: profile.email,
-          passwordHash: randomPasswordHash,
-          firstName: profile.firstName,
-          lastName: profile.lastName,
-          avatarUrl: profile.avatarUrl,
-          role: "COMMERCIAL",
-        },
+    if (linkTicket) {
+      const userId = this.googleLinkTickets.consume(linkTicket);
+      if (!userId) throw new BadRequestException("Ce lien d'association a expiré, réessayez depuis vos paramètres.");
+
+      const alreadyLinkedElsewhere = await this.prisma.user.findUnique({ where: { googleId: profile.googleId } });
+      if (alreadyLinkedElsewhere && alreadyLinkedElsewhere.id !== userId) {
+        throw new BadRequestException("Ce compte Google est déjà lié à un autre utilisateur Gecodis.");
+      }
+
+      const user = await this.prisma.user.update({
+        where: { id: userId },
+        data: { googleId: profile.googleId, avatarUrl: profile.avatarUrl, lastLoginAt: new Date() },
       });
+      return this.buildAuthResponse(user);
+    }
+
+    let user = await this.prisma.user.findUnique({ where: { googleId: profile.googleId } });
+
+    if (!user) {
+      const byEmail = await this.prisma.user.findUnique({ where: { email: profile.email } });
+      if (byEmail) {
+        // Automatic linking: Google has verified this email, and it already belongs to a staff account.
+        user = await this.prisma.user.update({
+          where: { id: byEmail.id },
+          data: { googleId: profile.googleId, avatarUrl: byEmail.avatarUrl ?? profile.avatarUrl },
+        });
+      } else {
+        // No password is ever set for Google-provisioned accounts — a random hash blocks password login for them.
+        const randomPasswordHash = await argon2.hash(`${Date.now()}-${Math.random()}`);
+        user = await this.prisma.user.create({
+          data: {
+            email: profile.email,
+            googleId: profile.googleId,
+            passwordHash: randomPasswordHash,
+            firstName: profile.firstName,
+            lastName: profile.lastName,
+            avatarUrl: profile.avatarUrl,
+            role: "COMMERCIAL",
+          },
+        });
+      }
     }
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     return this.buildAuthResponse(user);
+  }
+
+  /** Mints a one-time ticket an already-authenticated user can use to explicitly link their Google account (see loginWithGoogle case 1). */
+  createGoogleLinkTicket(userId: string): string {
+    return this.googleLinkTickets.issue(userId);
+  }
+
+  async unlinkGoogle(userId: string) {
+    await this.prisma.user.update({ where: { id: userId }, data: { googleId: null } });
+    return { linked: false };
   }
 
   async generateMfaSecret(userId: string) {

@@ -9,6 +9,7 @@ export interface SessionUser {
   firstName: string;
   lastName: string;
   role: "ADMIN" | "MANAGER" | "COMMERCIAL" | "LECTURE_SEULE";
+  googleLinked?: boolean;
 }
 
 interface AuthState {

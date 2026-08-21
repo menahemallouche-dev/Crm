@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Bell, Moon, Sun, Sparkles, LogOut } from "lucide-react";
+import { Search, Bell, Moon, Sun, Sparkles, LogOut, Settings } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/store/auth-store";
@@ -126,13 +126,18 @@ export function Topbar() {
       </button>
 
       <div className="flex items-center gap-2 pl-2 border-l border-border-subtle">
-        <div className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center text-xs font-semibold">
-          {user ? `${user.firstName[0]}${user.lastName[0]}` : "?"}
-        </div>
-        <div className="hidden lg:block text-sm">
-          <p className="font-medium text-ink leading-tight">{user ? `${user.firstName} ${user.lastName}` : "…"}</p>
-          <p className="text-xs text-ink-faint leading-tight">{user?.role}</p>
-        </div>
+        <Link href="/settings" className="flex items-center gap-2 hover:opacity-80 transition-opacity" title="Paramètres du compte">
+          <div className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center text-xs font-semibold">
+            {user ? `${user.firstName[0]}${user.lastName[0]}` : "?"}
+          </div>
+          <div className="hidden lg:block text-sm">
+            <p className="font-medium text-ink leading-tight">{user ? `${user.firstName} ${user.lastName}` : "…"}</p>
+            <p className="text-xs text-ink-faint leading-tight">{user?.role}</p>
+          </div>
+        </Link>
+        <Link href="/settings" className="btn-ghost !p-2" title="Paramètres">
+          <Settings size={16} />
+        </Link>
         <button
           className="btn-ghost !p-2"
           title="Déconnexion"

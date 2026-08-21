@@ -33,6 +33,10 @@ model User {
   phone         String?
   mfaEnabled    Boolean   @default(false)
   mfaSecret     String?
+  /// Google account id (profile.id), set once this User is linked to a Google
+  /// login — either automatically (email match on first Google sign-in) or
+  /// explicitly (POST /auth/google/link-ticket flow from an authenticated session).
+  googleId      String?   @unique
   isActive      Boolean   @default(true)
   lastLoginAt   DateTime?
   createdAt     DateTime  @default(now())

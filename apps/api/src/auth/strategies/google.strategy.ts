@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { Strategy, StrategyOptions, VerifyCallback } from "passport-google-oauth20";
 
 export interface GoogleProfile {
+  googleId: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -29,12 +30,15 @@ export class GoogleStrategy extends PassportStrategy(Strategy, "google") {
   }
 
   authenticate(req: any, options?: any) {
+    // `options` carries whatever GoogleAuthGuard.getAuthenticateOptions() returned
+    // (e.g. { state: linkTicket } for the account-linking flow) — preserved as-is.
     super.authenticate(req, { ...options, session: false });
   }
 
   validate(_accessToken: string, _refreshToken: string, profile: any, done: VerifyCallback) {
     const email = profile.emails?.[0]?.value;
     const googleProfile: GoogleProfile = {
+      googleId: profile.id,
       email,
       firstName: profile.name?.givenName ?? profile.displayName ?? "Utilisateur",
       lastName: profile.name?.familyName ?? "Google",

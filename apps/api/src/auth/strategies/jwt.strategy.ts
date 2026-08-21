@@ -29,6 +29,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: user.role,
       firstName: user.firstName,
       lastName: user.lastName,
+      googleLinked: Boolean(user.googleId),
     };
   }
 }

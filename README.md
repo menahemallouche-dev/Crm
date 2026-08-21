@@ -12,7 +12,8 @@ Design premium inspiré HubSpot / Salesforce / Monday / Linear — mode sombre, 
 | Frontend | Next.js 14 (App Router) + React + TypeScript + Tailwind |
 | Base de données | PostgreSQL |
 | ORM | Prisma |
-| Auth | JWT (access + refresh) + MFA TOTP (otplib) + OAuth Google — auth séparée pour le portail client |
+| Auth | JWT (access + refresh) + MFA TOTP (otplib) + OAuth Google (avec liaison explicite à un compte existant) — auth séparée pour le portail client |
+| Tests | Jest (unitaire) + Jest/Supertest (e2e, base PostgreSQL réelle) |
 | IA | OpenAI API, avec repli heuristique déterministe si pas de clé |
 | Files d'attente | Redis + BullMQ |
 | Emails | Adaptateur console / Resend / SendGrid / SMTP |
@@ -61,7 +62,7 @@ Sans aucune clé API externe, l'application est **entièrement fonctionnelle en 
 17. **Connecteurs ERP / facturation / WMS** — webhooks sortants signés HMAC (création client, devis signé, opportunité gagnée) et entrants (facture payée/créée côté facturation, alerte stock/expédition côté WMS), avec journal d'audit complet (`GET /api/webhooks/logs`).
 18. **Export PDF natif** — entreprises, devis, factures et classements de rentabilité, générés nativement (pdfkit, aucune dépendance navigateur).
 19. **Recherche Elasticsearch** — bascule optionnelle (`SEARCH_PROVIDER=elasticsearch`) avec indexation automatique et repli transparent vers PostgreSQL si le nœud est indisponible.
-20. **OAuth Google** — connexion staff via Google, en plus de l'email/mot de passe.
+20. **OAuth Google** — connexion staff via Google, en plus de l'email/mot de passe, avec liaison automatique (email déjà connu, vérifié par Google) et liaison explicite depuis `/settings` (« Lier mon compte Google ») pour un compte déjà authentifié.
 21. **Enrichissement LinkedIn** — via une API tierce conforme (type Proxycurl), en plus d'INSEE/Pappers/Google Places.
 
 ## IA — comment ça marche sans clé OpenAI
@@ -80,9 +81,35 @@ Chaque service IA (`apps/api/src/ai/`) suit le même principe : une heuristique 
 
 `apps/api/src/webhooks/` — sortant : `WebhookDispatcherService.dispatch()` met en file (BullMQ, retry exponentiel) un événement signé HMAC-SHA256 vers `BILLING_SOFTWARE_WEBHOOK_URL` / `WMS_WEBHOOK_URL` (`company.created`, `quote.signed`, `deal.won`). Entrant : `POST /api/webhooks/billing` et `POST /api/webhooks/wms`, signature vérifiée sur les octets bruts de la requête (`invoice.paid`/`invoice.created` mettent à jour les factures, `warehouse.threshold_alert`/`shipment.completed` créent tâche/activité). Chaque échange est journalisé dans `ConnectorEventLog`, consultable via `GET /api/webhooks/logs`.
 
+## Liaison de compte Google
+
+`apps/api/src/auth/` gère trois cas, dans cet ordre (voir `AuthService.loginWithGoogle`) :
+
+1. **Compte déjà lié** (`googleId` connu) → connexion directe.
+2. **Email Google déjà utilisé par un compte email/mot de passe existant** → liaison automatique (Google ayant vérifié l'email, c'est sans risque) puis connexion.
+3. **Aucune correspondance** → création d'un nouveau compte.
+
+Un quatrième cas permet à un utilisateur **déjà connecté** de lier explicitement son compte Google sans dépendre d'une correspondance d'email : il clique « Lier mon compte Google » sur `/settings`, ce qui appelle `POST /auth/google/link-ticket` (authentifié) pour obtenir un jeton à usage unique et durée de vie courte (5 min), relayé à Google via le paramètre `state` de l'OAuth (`GoogleLinkTicketService`, en mémoire — à remplacer par Redis pour un déploiement multi-instance). Un compte Google ne peut jamais être lié à deux comptes Gecodis à la fois.
+
+## Tests automatisés
+
+```bash
+# Unitaires — heuristiques IA, signature de webhook, services (Prisma mocké). Aucune base requise.
+npm run test --workspace=apps/api
+
+# End-to-end — auth, portail client, webhooks. Nécessite une base PostgreSQL
+# dédiée (gecodis_crm_test) ; les migrations sont appliquées automatiquement
+# au lancement (voir test/global-setup.ts).
+createdb gecodis_crm_test   # une seule fois
+npm run test:e2e --workspace=apps/api
+```
+
+- **62 tests unitaires** (`src/**/*.spec.ts`) : scoring IA (besoins/potentiel/priorité/immobilier/rôle des contacts), signature HMAC (payload et corps brut), calcul de rentabilité et notation, transitions du pipeline (webhook `deal.won` déclenché une seule fois, rappels automatiques), logique de liaison de compte Google (les 4 cas ci-dessus).
+- **26 tests e2e** (`test/**/*.e2e-spec.ts`, contre une vraie base Postgres) : inscription/connexion/rejet de mot de passe, isolation totale entre jetons staff et portail (vérifiée dans les deux sens), scoping d'un client portail à sa seule entreprise, signature électronique d'un devis, invitation d'un compte portail par le staff, rejet/acceptation de webhook selon la signature HMAC, journalisation dans `ConnectorEventLog`.
+
 ## Roadmap / limites connues
 
-Ce dépôt livre une base fonctionnelle de bout en bout plutôt qu'une simulation : schéma Prisma, 25+ modules API et pages web sont réels et testés (migrations + seed + build + appels HTTP réels validés, y compris signature de webhook et isolation des jetons portail). Points volontairement laissés en extension pour une v2 :
+Ce dépôt livre une base fonctionnelle de bout en bout plutôt qu'une simulation : schéma Prisma, 25+ modules API et pages web sont réels, avec 88 tests automatisés qui passent (unitaires + e2e contre une vraie base PostgreSQL — voir § Tests automatisés) en plus des migrations/seed/build validés. Points volontairement laissés en extension pour une v2 :
 
 - **Export Excel natif (.xlsx)** — l'export CSV (déjà compatible Excel) et l'export PDF sont complets ; un export `.xlsx` avec mise en forme reste à ajouter.
 - **Connecteurs ERP/WMS** — le contrat webhook (signature, événements, journal) est fonctionnel des deux côtés, mais n'a été testé qu'en simulant l'appel HTTP ; l'intégration avec un logiciel de facturation ou un WMS réel nécessitera d'adapter le format d'événement à celui de l'outil choisi.
@@ -93,21 +120,22 @@ Ce dépôt livre une base fonctionnelle de bout en bout plutôt qu'une simulatio
 
 ```
 apps/
-  api/      NestJS — API REST (Swagger sur /api/docs)
-  web/      Next.js — application web
+  api/
+    src/      NestJS — API REST (Swagger sur /api/docs), tests unitaires en *.spec.ts à côté du code
+    test/     Tests e2e (*.e2e-spec.ts) + bootstrap/config Jest dédiés
+  web/        Next.js — application web
 packages/
-  shared/   Enums & types partagés (pipeline, scoring, rôles…)
+  shared/     Enums & types partagés (pipeline, scoring, rôles…)
 docker-compose.yml   Postgres, Redis, Elasticsearch (optionnel), Mailhog (dev)
 ```
 
 ## Tests effectués
 
 - `tsc --noEmit` et `nest build` : ✅ sans erreur sur l'API.
-- `next build` : ✅ sans erreur sur le web (23 routes générées, staff + portail).
+- `next build` : ✅ sans erreur sur le web (24 routes générées, staff + portail + paramètres).
+- **62 tests unitaires + 26 tests e2e : ✅ tous verts**, exécutés réellement (pas seulement écrits) — voir § Tests automatisés.
 - Migrations Prisma + seed exécutés sur une base PostgreSQL réelle : ✅.
-- API démarrée et testée en conditions réelles :
-  - login JWT staff, dashboard, Kanban, assistant IA sur les 8 questions de l'énoncé, rentabilité, matching immobilier ;
+- API démarrée et testée en conditions réelles (au-delà des tests automatisés, en plus des questions d'assistant IA de l'énoncé) :
   - export PDF (entreprises, devis, classement de rentabilité) — fichiers PDF valides générés et vérifiés ;
-  - portail client : connexion, isolation vérifiée (un jeton portail est rejeté avec 401 sur une route staff et réciproquement), consultation devis/factures/contrats/suivi, signature électronique d'un devis, invitation d'un compte par le staff ;
-  - webhooks entrants : requête rejetée sans signature (403), rejetée avec signature invalide (403), acceptée et traitée avec la bonne signature HMAC (facture marquée payée), journalisée dans `ConnectorEventLog` ;
-  - recherche : repli PostgreSQL fonctionnel, endpoint de réindexation Elasticsearch testé (no-op hors mode ES, comme attendu).
+  - recherche : repli PostgreSQL fonctionnel, endpoint de réindexation Elasticsearch testé (no-op hors mode ES, comme attendu) ;
+  - invitation d'un compte portail par le staff avec vérification que le hash du mot de passe n'est jamais renvoyé par l'API (faille détectée et corrigée pendant la validation).

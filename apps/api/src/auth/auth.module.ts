@@ -7,6 +7,7 @@ import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./strategies/jwt.strategy";
 import { GoogleStrategy } from "./strategies/google.strategy";
 import { GoogleAuthGuard } from "./guards/google-auth.guard";
+import { GoogleLinkTicketService } from "./google-link-ticket.service";
 
 // GoogleStrategy's base class throws at construction time if clientID/clientSecret
 // are missing, so it must only be registered as a provider when OAuth is actually
@@ -28,7 +29,7 @@ if (process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, GoogleAuthGuard, ...googleProviders],
+  providers: [AuthService, JwtStrategy, GoogleAuthGuard, GoogleLinkTicketService, ...googleProviders],
   controllers: [AuthController],
   exports: [AuthService],
 })

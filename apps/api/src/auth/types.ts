@@ -6,6 +6,7 @@ export interface AuthenticatedUser {
   role: UserRole;
   firstName: string;
   lastName: string;
+  googleLinked: boolean;
 }
 
 export interface JwtPayload {

@@ -256,6 +256,17 @@ const COMPANIES: SeedCompany[] = [
 ];
 
 async function main() {
+  // Idempotent guard: only the User/Company upserts below are safe to re-run —
+  // deals/activities/invoices/etc. use plain create() and would duplicate on a
+  // second pass. This lets the seed be wired unconditionally into a deploy's
+  // start command (see root package.json `start:api`) without piling up
+  // duplicate demo data on every restart/redeploy.
+  const alreadySeeded = await prisma.user.findUnique({ where: { email: "demo@gecodis.fr" } });
+  if (alreadySeeded) {
+    console.log("🌱 Seed déjà exécuté (demo@gecodis.fr existe) — rien à faire.");
+    return;
+  }
+
   console.log("🌱 Seed — Gecodis CRM");
 
   // ── Users ──────────────────────────────────────────────────────────

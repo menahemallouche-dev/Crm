@@ -17,7 +17,11 @@
     "test:e2e": "npm run test:e2e --workspace=apps/api",
     "prisma:generate": "npm run prisma:generate --workspace=apps/api",
     "prisma:migrate": "npm run prisma:migrate --workspace=apps/api",
-    "prisma:seed": "npm run prisma:seed --workspace=apps/api"
+    "prisma:seed": "npm run prisma:seed --workspace=apps/api",
+    "build:api": "npm run build --workspace=packages/shared && npm run build --workspace=apps/api",
+    "start:api": "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/main.js",
+    "build:web": "npm run build --workspace=packages/shared && npm run build --workspace=apps/web",
+    "start:web": "npm start --workspace=apps/web"
   },
   "engines": {
     "node": ">=20"

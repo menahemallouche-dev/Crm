@@ -35,7 +35,9 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup("api/docs", app, document);
 
-  const port = process.env.API_PORT ?? 4000;
+  // Most PaaS (Railway, Render, Heroku…) inject PORT and require the app to bind to it;
+  // API_PORT remains the override for local/manual setups (see .env.example).
+  const port = process.env.PORT ?? process.env.API_PORT ?? 4000;
   await app.listen(port);
   // eslint-disable-next-line no-console
   console.log(`🚀 Gecodis CRM API running on http://localhost:${port}/api`);

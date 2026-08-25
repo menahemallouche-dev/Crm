@@ -62,6 +62,13 @@ enum PropertyStatus {
   INCONNU
 }
 
+/// Est-ce que l'entreprise gère sa logistique en interne ou la sous-traite (et à qui, si identifiable) ?
+enum LogisticsMode {
+  INTERNE
+  SOUS_TRAITANT
+  INCONNU
+}
+
 enum RealEstateAssetType {
   ENTREPOT
   PLUSIEURS_ENTREPOTS
@@ -151,6 +158,12 @@ model Company {
   hasLogisticsPlatform    Boolean @default(false)
   realEstateConfidence    Int?    // 0-100 overall confidence
   estimatedWarehouseSqm   Int?
+
+  // --- Logistique : gestion interne ou sous-traitée ? ---
+  logisticsMode              LogisticsMode @default(INCONNU)
+  logisticsSubcontractorName String?       // ex: "Geodis", "XPO Logistics"... si identifié
+  logisticsModeConfidence    Int?          // 0-100
+  logisticsModeSource        String?       // "keyword" | "ai" | "manuel"
 
   ownerUserId     String?
   ownerUser       User?    @relation("CompanyOwner", fields: [ownerUserId], references: [id])
@@ -347,6 +360,7 @@ model DealStageEvent {
 enum ActivityType {
   APPEL
   EMAIL
+  WHATSAPP
   VISITE
   RDV
   TACHE
@@ -771,4 +785,43 @@ model PortalUser {
   createdAt    DateTime  @default(now())
 
   @@index([companyId])
+}
+
+// ───────────────────────────── SAUVEGARDES ──────────────────────────────
+
+enum BackupType {
+  WEEKLY
+  PRE_MIGRATION
+  MANUAL
+}
+
+enum BackupStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum BackupStorage {
+  LOCAL
+  S3
+}
+
+/// Metadata record for one full-database export (see backup/backup.service.ts).
+/// The actual dump (gzipped JSON, one array per Prisma model) lives on disk
+/// or in S3 — this row is how the app lists/finds/restores from it.
+model BackupRecord {
+  id          String        @id @default(cuid())
+  type        BackupType
+  status      BackupStatus  @default(IN_PROGRESS)
+  storage     BackupStorage
+  location    String        // local file path, or S3 key
+  sizeBytes   Int?
+  modelCounts Json?         // { "Company": 8, "Contact": 15, ... } — quick sanity check without opening the file
+  relatedMigration String?  // for PRE_MIGRATION backups: the migration name about to be applied
+  errorMessage String?
+  triggeredByUserId String?
+  createdAt   DateTime      @default(now())
+  completedAt DateTime?
+
+  @@index([type, createdAt])
 }

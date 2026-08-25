@@ -23,6 +23,12 @@ export class ContactsController {
     return this.contactsService.upcomingBirthdays();
   }
 
+  /** Contacts who open the mailings sent to them, ranked by engagement — the shortlist to call first. */
+  @Get("engaged")
+  engaged(@Query("limit") limit?: string) {
+    return this.contactsService.engagedContacts(limit ? Number(limit) : undefined);
+  }
+
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.contactsService.findOne(id);

@@ -5,6 +5,7 @@ import {
   classifyContact,
   computeCommercialPriority,
   computePotential,
+  inferLogisticsMode,
   inferRealEstateSignals,
   scoreCompanyNeeds,
 } from "./heuristics";
@@ -27,6 +28,7 @@ export interface CompanyScoringResult {
   commercialPriority: ReturnType<typeof computeCommercialPriority>;
   summary: string;
   realEstate: ReturnType<typeof inferRealEstateSignals>;
+  logistics: ReturnType<typeof inferLogisticsMode>;
 }
 
 @Injectable()
@@ -38,6 +40,7 @@ export class ScoringService {
   async scoreCompany(input: CompanyScoringInput): Promise<CompanyScoringResult> {
     const heuristicScores = scoreCompanyNeeds(input);
     const realEstate = inferRealEstateSignals(input);
+    let logistics = inferLogisticsMode(input);
 
     let needsScores = heuristicScores;
     let summary = this.buildHeuristicSummary(input, heuristicScores);
@@ -46,11 +49,13 @@ export class ScoringService {
       const aiResult = await this.openAi.completeJson<{
         needsScores?: Partial<NeedsScores>;
         summary?: string;
+        logisticsMode?: string;
+        logisticsSubcontractorName?: string;
       }>(
         `Tu es un analyste commercial spécialisé en logistique, transport et immobilier logistique B2B.
 Analyse l'entreprise fournie et renvoie un JSON strict de la forme:
-{"needsScores": {"transport": 0-100, "logistique": 0-100, "stockage": 0-100, "affretement": 0-100, "fulfillment": 0-100, "entrepot": 0-100}, "summary": "2-3 phrases en français expliquant le potentiel commercial pour un prestataire logistique/transport"}
-Base-toi sur le code NAF, l'activité, l'effectif et le chiffre d'affaires.`,
+{"needsScores": {"transport": 0-100, "logistique": 0-100, "stockage": 0-100, "affretement": 0-100, "fulfillment": 0-100, "entrepot": 0-100}, "summary": "2-3 phrases en français expliquant le potentiel commercial pour un prestataire logistique/transport", "logisticsMode": "INTERNE|SOUS_TRAITANT|INCONNU", "logisticsSubcontractorName": "nom du sous-traitant logistique si identifiable, sinon null"}
+Base-toi sur le code NAF, l'activité, l'effectif et le chiffre d'affaires. Pour logisticsMode, déduis si l'entreprise gère probablement sa logistique en interne (flotte/entrepôts propres) ou la sous-traite à un prestataire (GEODIS, XPO, DHL, Kuehne+Nagel, DB Schenker, DSV, etc.) — INCONNU si aucun signal.`,
         JSON.stringify(input),
       );
 
@@ -67,12 +72,27 @@ Base-toi sur le code NAF, l'activité, l'effectif et le chiffre d'affaires.`,
         ) as NeedsScores;
       }
       if (aiResult?.summary) summary = aiResult.summary;
+
+      // Only let the AI override the heuristic when it's confident enough to name a
+      // mode; otherwise keep the deterministic (and explainable) heuristic result.
+      if (
+        aiResult?.logisticsMode &&
+        ["INTERNE", "SOUS_TRAITANT", "INCONNU"].includes(aiResult.logisticsMode) &&
+        aiResult.logisticsMode !== "INCONNU"
+      ) {
+        logistics = {
+          logisticsMode: aiResult.logisticsMode as typeof logistics.logisticsMode,
+          logisticsSubcontractorName:
+            aiResult.logisticsSubcontractorName ?? logistics.logisticsSubcontractorName,
+          logisticsModeConfidence: Math.max(logistics.logisticsModeConfidence, 65),
+        };
+      }
     }
 
     const potential = computePotential({ revenue: input.revenue, needsScores });
     const commercialPriority = computeCommercialPriority(potential);
 
-    return { needsScores, potential, commercialPriority, summary, realEstate };
+    return { needsScores, potential, commercialPriority, summary, realEstate, logistics };
   }
 
   async classifyContactRole(input: { jobTitle?: string | null; companyName?: string | null }) {

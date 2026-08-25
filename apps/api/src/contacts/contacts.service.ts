@@ -77,7 +77,82 @@ export class ContactsService {
       },
     });
     if (!contact) throw new NotFoundException("Contact introuvable");
-    return contact;
+    const mailingEngagement = await this.mailingEngagement(id);
+    return { ...contact, mailingEngagement };
+  }
+
+  /** Sent/opened mailing counts for one contact, across every campaign — used to spot "reads emails but never replies" contacts worth a phone call instead. */
+  async mailingEngagement(contactId: string) {
+    const recipients = await this.prisma.campaignRecipient.findMany({
+      where: { contactId },
+      select: { sentAt: true, openedAt: true, clickedAt: true },
+    });
+    const sentCount = recipients.filter((r) => r.sentAt).length;
+    const opened = recipients.filter((r) => r.openedAt);
+    const lastOpenedAt = opened.reduce<Date | null>(
+      (latest, r) => (!latest || (r.openedAt as Date) > latest ? (r.openedAt as Date) : latest),
+      null,
+    );
+    return {
+      sentCount,
+      openedCount: opened.length,
+      clickedCount: recipients.filter((r) => r.clickedAt).length,
+      openRate: sentCount ? Math.round((opened.length / sentCount) * 100) : 0,
+      lastOpenedAt,
+    };
+  }
+
+  /**
+   * Contacts who actually open the mailings we send them, ranked by engagement —
+   * exactly the shortlist a rep should call first instead of sending yet another
+   * email that may or may not land. Only contacts with at least one open are included.
+   */
+  async engagedContacts(limit = 50) {
+    const recipients = await this.prisma.campaignRecipient.findMany({
+      where: { contactId: { not: null } },
+      select: { contactId: true, sentAt: true, openedAt: true },
+    });
+
+    const byContact = new Map<string, { sent: number; opened: number; lastOpenedAt: Date | null }>();
+    for (const r of recipients) {
+      if (!r.contactId) continue;
+      const entry = byContact.get(r.contactId) ?? { sent: 0, opened: 0, lastOpenedAt: null };
+      if (r.sentAt) entry.sent += 1;
+      if (r.openedAt) {
+        entry.opened += 1;
+        if (!entry.lastOpenedAt || r.openedAt > entry.lastOpenedAt) entry.lastOpenedAt = r.openedAt;
+      }
+      byContact.set(r.contactId, entry);
+    }
+
+    const ranked = [...byContact.entries()]
+      .filter(([, stats]) => stats.opened > 0)
+      .sort((a, b) => b[1].opened - a[1].opened || (b[1].lastOpenedAt?.getTime() ?? 0) - (a[1].lastOpenedAt?.getTime() ?? 0))
+      .slice(0, limit);
+
+    if (ranked.length === 0) return [];
+
+    const contacts = await this.prisma.contact.findMany({
+      where: { id: { in: ranked.map(([contactId]) => contactId) } },
+      include: { company: { select: { id: true, name: true, city: true } } },
+    });
+    const byId = new Map(contacts.map((c) => [c.id, c]));
+
+    return ranked
+      .map(([contactId, stats]) => {
+        const contact = byId.get(contactId);
+        if (!contact) return null;
+        return {
+          ...contact,
+          mailingEngagement: {
+            sentCount: stats.sent,
+            openedCount: stats.opened,
+            openRate: stats.sent ? Math.round((stats.opened / stats.sent) * 100) : 0,
+            lastOpenedAt: stats.lastOpenedAt,
+          },
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => !!c);
   }
 
   async update(id: string, dto: UpdateContactDto) {

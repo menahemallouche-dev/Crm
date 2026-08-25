@@ -24,6 +24,8 @@ import { AutomationModule } from "./automation/automation.module";
 import { QueueModule } from "./queue/queue.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { PortalModule } from "./portal/portal.module";
+import { BackupModule } from "./backup/backup.module";
+import { ProspectingModule } from "./prospecting/prospecting.module";
 import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 
@@ -53,6 +55,8 @@ import { RolesGuard } from "./common/guards/roles.guard";
     AutomationModule,
     WebhooksModule,
     PortalModule,
+    BackupModule,
+    ProspectingModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

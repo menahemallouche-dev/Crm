@@ -110,6 +110,14 @@ export class EnrichmentService {
         hasStore: company.hasStore || result.realEstate.hasStore,
         hasLogisticsPlatform: company.hasLogisticsPlatform || result.realEstate.hasLogisticsPlatform,
         realEstateConfidence: result.realEstate.realEstateConfidence,
+        logisticsMode:
+          company.logisticsMode === "INCONNU"
+            ? (result.logistics.logisticsMode as any)
+            : company.logisticsMode,
+        logisticsSubcontractorName:
+          company.logisticsSubcontractorName ?? result.logistics.logisticsSubcontractorName,
+        logisticsModeConfidence: result.logistics.logisticsModeConfidence,
+        logisticsModeSource: result.logistics.logisticsMode !== "INCONNU" ? "heuristic" : company.logisticsModeSource,
       },
     });
     await this.elasticsearch.indexCompany(updated);

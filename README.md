@@ -64,6 +64,9 @@ Sans aucune clé API externe, l'application est **entièrement fonctionnelle en 
 19. **Recherche Elasticsearch** — bascule optionnelle (`SEARCH_PROVIDER=elasticsearch`) avec indexation automatique et repli transparent vers PostgreSQL si le nœud est indisponible.
 20. **OAuth Google** — connexion staff via Google, en plus de l'email/mot de passe, avec liaison automatique (email déjà connu, vérifié par Google) et liaison explicite depuis `/settings` (« Lier mon compte Google ») pour un compte déjà authentifié.
 21. **Enrichissement LinkedIn** — via une API tierce conforme (type Proxycurl), en plus d'INSEE/Pappers/Google Places.
+22. **Sauvegardes** — export complet de la base (hebdomadaire automatique + à la demande + snapshot juste avant chaque migration structurelle), stockage local + S3 optionnel, restauration en un clic depuis `/settings` (réservé ADMIN).
+23. **Canal de contact & engagement mailing** — chaque activité enregistre le canal utilisé (Appel/Email/**WhatsApp**/Visite/RDV…) ; chaque contact affiche ses statistiques d'ouverture d'emails de campagne, avec une vue dédiée « Contacts engagés » (`/contacts` → onglet) pour prioriser l'appel des contacts qui lisent leurs emails.
+24. **Chasse commerciale** — recherche manuelle (jamais automatique) de nouveaux prospects par secteur/métier via INSEE Sirene/Pappers, avec icône de secteur, aperçu des besoins logistiques et détection heuristique « logistique interne vs sous-traitée » (avec nom du sous-traitant si identifiable) ; import en un clic vers une fiche entreprise complète.
 
 ## IA — comment ça marche sans clé OpenAI
 
@@ -91,6 +94,24 @@ Chaque service IA (`apps/api/src/ai/`) suit le même principe : une heuristique 
 
 Un quatrième cas permet à un utilisateur **déjà connecté** de lier explicitement son compte Google sans dépendre d'une correspondance d'email : il clique « Lier mon compte Google » sur `/settings`, ce qui appelle `POST /auth/google/link-ticket` (authentifié) pour obtenir un jeton à usage unique et durée de vie courte (5 min), relayé à Google via le paramètre `state` de l'OAuth (`GoogleLinkTicketService`, en mémoire — à remplacer par Redis pour un déploiement multi-instance). Un compte Google ne peut jamais être lié à deux comptes Gecodis à la fois.
 
+## Sauvegardes & restauration
+
+`apps/api/src/backup/` — `BackupService` exporte l'intégralité de la base via Prisma (ordre des modèles calculé par tri topologique sur le DMMF, pour respecter les contraintes de clé étrangère à la restauration), compresse en gzip, et stocke en local + sur S3 si `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` sont configurées (indispensable sur un PaaS dont le disque est éphémère entre deux déploiements). Trois déclencheurs :
+
+- **Hebdomadaire** — tous les dimanches 3h (`@Cron`).
+- **Manuel** — bouton « Sauvegarder maintenant » dans `/settings` (réservé ADMIN).
+- **Pré-migration** — `apps/api/src/backup/pre-migration-snapshot.script.ts`, exécuté automatiquement juste avant `prisma migrate deploy` dans la chaîne de déploiement (`npm run start:api`). Ce script dump en SQL brut (pas via le client Prisma typé, qui reflète déjà le *nouveau* schéma alors que la base a encore l'*ancien*) — voir les commentaires du fichier.
+
+Restauration : `POST /api/backups/:id/restore` (ADMIN, confirmation explicite requise) — remplace toutes les tables sauvegardées par le contenu de l'archive, dans le bon ordre. C'est le filet de sécurité demandé : si une mise à jour structurelle pose problème, on revient à la sauvegarde prise juste avant.
+
+## Canal de contact & engagement mailing
+
+Chaque `Activity` porte un `type` (`APPEL`/`EMAIL`/`WHATSAPP`/`VISITE`/`RDV`/…) — formulaire « Ajouter une activité » sur la fiche entreprise. Chaque `CampaignRecipient` trace `sentAt`/`openedAt`/`clickedAt` par contact (pixel de suivi déjà en place, voir § Campagnes) ; `ContactsService.mailingEngagement()` agrège ces données par contact (affiché sur sa fiche) et `GET /api/contacts/engaged` classe les contacts qui ouvrent effectivement leurs emails — exposé dans `/contacts` sous l'onglet « Contacts engagés », avec lien d'appel direct, pour prioriser le téléphone sur l'email quand ça marche mieux.
+
+## Chasse commerciale
+
+`apps/api/src/prospecting/` — recherche **manuelle uniquement** (aucun cron, aucun déclenchement automatique, pour ne pas consommer inutilement le quota des API tierces) par code NAF/secteur et localisation, via INSEE Sirene ou Pappers (recherche par critères, pas juste par SIREN comme l'enrichissement classique) ; repli sur un jeu de données de démonstration clairement identifié si aucune clé n'est configurée. Chaque résultat affiche une icône de secteur (`sectorTagForNaf`, pictogrammes génériques — jamais de vrai logo de marque), un aperçu des besoins logistiques (mêmes heuristiques que le scoring des entreprises) et une détection best-effort « logistique interne / sous-traitée » (`inferLogisticsMode`, avec reconnaissance des principaux prestataires 3PL français/européens si nommés dans le texte). Un clic « Importer » crée la fiche entreprise et déclenche le pipeline d'enrichissement/scoring normal ; les imports sont dé-dupliqués par SIREN.
+
 ## Tests automatisés
 
 ```bash
@@ -104,12 +125,12 @@ createdb gecodis_crm_test   # une seule fois
 npm run test:e2e --workspace=apps/api
 ```
 
-- **62 tests unitaires** (`src/**/*.spec.ts`) : scoring IA (besoins/potentiel/priorité/immobilier/rôle des contacts), signature HMAC (payload et corps brut), calcul de rentabilité et notation, transitions du pipeline (webhook `deal.won` déclenché une seule fois, rappels automatiques), logique de liaison de compte Google (les 4 cas ci-dessus).
-- **26 tests e2e** (`test/**/*.e2e-spec.ts`, contre une vraie base Postgres) : inscription/connexion/rejet de mot de passe, isolation totale entre jetons staff et portail (vérifiée dans les deux sens), scoping d'un client portail à sa seule entreprise, signature électronique d'un devis, invitation d'un compte portail par le staff, rejet/acceptation de webhook selon la signature HMAC, journalisation dans `ConnectorEventLog`.
+- **89 tests unitaires** (`src/**/*.spec.ts`) : scoring IA (besoins/potentiel/priorité/immobilier/rôle des contacts/logistique interne-sous-traitée), signature HMAC (payload et corps brut), calcul de rentabilité et notation, transitions du pipeline (webhook `deal.won` déclenché une seule fois, rappels automatiques), logique de liaison de compte Google (les 4 cas ci-dessus), export/restauration de sauvegarde (tri topologique, wipe+reload en ordre FK-safe, round-trip modèle et SQL brut), engagement mailing par contact, recherche/import de la chasse commerciale (repli démo, sélection de fournisseur, dé-duplication).
+- **36 tests e2e** (`test/**/*.e2e-spec.ts`, contre une vraie base Postgres) : inscription/connexion/rejet de mot de passe, isolation totale entre jetons staff et portail (vérifiée dans les deux sens), scoping d'un client portail à sa seule entreprise, signature électronique d'un devis, invitation d'un compte portail par le staff, rejet/acceptation de webhook selon la signature HMAC, journalisation dans `ConnectorEventLog`, cycle complet de sauvegarde (déclenchement/liste/téléchargement, restauration protégée par confirmation), recherche et import de prospects.
 
 ## Roadmap / limites connues
 
-Ce dépôt livre une base fonctionnelle de bout en bout plutôt qu'une simulation : schéma Prisma, 25+ modules API et pages web sont réels, avec 88 tests automatisés qui passent (unitaires + e2e contre une vraie base PostgreSQL — voir § Tests automatisés) en plus des migrations/seed/build validés. Points volontairement laissés en extension pour une v2 :
+Ce dépôt livre une base fonctionnelle de bout en bout plutôt qu'une simulation : schéma Prisma, 28+ modules API et pages web sont réels, avec 125 tests automatisés qui passent (89 unitaires + 36 e2e contre une vraie base PostgreSQL — voir § Tests automatisés) en plus des migrations/seed/build validés. Points volontairement laissés en extension pour une v2 :
 
 - **Export Excel natif (.xlsx)** — l'export CSV (déjà compatible Excel) et l'export PDF sont complets ; un export `.xlsx` avec mise en forme reste à ajouter.
 - **Connecteurs ERP/WMS** — le contrat webhook (signature, événements, journal) est fonctionnel des deux côtés, mais n'a été testé qu'en simulant l'appel HTTP ; l'intégration avec un logiciel de facturation ou un WMS réel nécessitera d'adapter le format d'événement à celui de l'outil choisi.
@@ -132,10 +153,12 @@ docker-compose.yml   Postgres, Redis, Elasticsearch (optionnel), Mailhog (dev)
 ## Tests effectués
 
 - `tsc --noEmit` et `nest build` : ✅ sans erreur sur l'API.
-- `next build` : ✅ sans erreur sur le web (24 routes générées, staff + portail + paramètres).
-- **62 tests unitaires + 26 tests e2e : ✅ tous verts**, exécutés réellement (pas seulement écrits) — voir § Tests automatisés.
+- `next build` : ✅ sans erreur sur le web (25 routes générées, staff + portail + paramètres + chasse commerciale).
+- **89 tests unitaires + 36 tests e2e : ✅ tous verts**, exécutés réellement (pas seulement écrits) — voir § Tests automatisés.
 - Migrations Prisma + seed exécutés sur une base PostgreSQL réelle : ✅.
 - API démarrée et testée en conditions réelles (au-delà des tests automatisés, en plus des questions d'assistant IA de l'énoncé) :
   - export PDF (entreprises, devis, classement de rentabilité) — fichiers PDF valides générés et vérifiés ;
   - recherche : repli PostgreSQL fonctionnel, endpoint de réindexation Elasticsearch testé (no-op hors mode ES, comme attendu) ;
-  - invitation d'un compte portail par le staff avec vérification que le hash du mot de passe n'est jamais renvoyé par l'API (faille détectée et corrigée pendant la validation).
+  - invitation d'un compte portail par le staff avec vérification que le hash du mot de passe n'est jamais renvoyé par l'API (faille détectée et corrigée pendant la validation) ;
+  - sauvegarde/restauration exécutée en conditions réelles contre PostgreSQL (script pré-migration lancé manuellement, archive relue, `BackupRecord` vérifié en base) ;
+  - fiabilisé au passage : `CompaniesService.triggerEnrichment()` pouvait rester bloqué indéfiniment si Redis était injoignable (retry infini d'ioredis) au lieu de basculer sur le repli synchrone documenté — désormais borné par un timeout.

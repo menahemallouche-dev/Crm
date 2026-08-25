@@ -16,6 +16,7 @@ import {
   FileSignature,
   Sparkles,
   Truck,
+  Radar,
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
@@ -25,6 +26,7 @@ const NAV = [
   { href: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { href: "/companies", label: "Entreprises", icon: Building2 },
   { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/prospecting", label: "Chasse commerciale", icon: Radar },
   { href: "/pipeline", label: "Pipeline", icon: KanbanSquare },
   { href: "/quotes", label: "Devis", icon: FileText },
   { href: "/invoices", label: "Factures", icon: Receipt },

@@ -19,7 +19,7 @@
     "prisma:migrate": "npm run prisma:migrate --workspace=apps/api",
     "prisma:seed": "npm run prisma:seed --workspace=apps/api",
     "build:api": "npm run build --workspace=packages/shared && npm run build --workspace=apps/api",
-    "start:api": "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && (npm run prisma:seed --workspace=apps/api || true) && node apps/api/dist/main.js",
+    "start:api": "node apps/api/dist/backup/pre-migration-snapshot.script.js || true; npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && (npm run prisma:seed --workspace=apps/api || true) && node apps/api/dist/main.js",
     "build:web": "npm run build --workspace=packages/shared && npm run build --workspace=apps/web",
     "start:web": "npm start --workspace=apps/web"
   },

@@ -55,10 +55,18 @@ export class CompaniesService {
     return company;
   }
 
-  /** Enqueues the enrichment pipeline; falls back to an inline synchronous run if Redis is unreachable. */
+  /**
+   * Enqueues the enrichment pipeline; falls back to an inline synchronous run if Redis
+   * is unreachable. Raced against a short timeout: ioredis (with `maxRetriesPerRequest:
+   * null`, required by BullMQ workers elsewhere) retries a down connection indefinitely,
+   * so `.add()` alone would never reject and this call would hang rather than fall back.
+   */
   async triggerEnrichment(companyId: string) {
     try {
-      await this.enrichmentQueue.add("enrich", { companyId }, { attempts: 3, backoff: { type: "exponential", delay: 5000 } });
+      await Promise.race([
+        this.enrichmentQueue.add("enrich", { companyId }, { attempts: 3, backoff: { type: "exponential", delay: 5000 } }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout file d'attente Redis")), 3000)),
+      ]);
     } catch (error) {
       this.logger.warn(`File d'attente Redis indisponible, enrichissement synchrone: ${(error as Error).message}`);
       this.enrichmentService.enrichCompany(companyId).catch((e) => this.logger.error(e));
@@ -142,7 +150,13 @@ export class CompaniesService {
     const { skipAutoEnrichment, foundedAt, ...rest } = dto;
     const company = await this.prisma.company.update({
       where: { id },
-      data: { ...rest, foundedAt: foundedAt ? new Date(foundedAt) : undefined },
+      data: {
+        ...rest,
+        foundedAt: foundedAt ? new Date(foundedAt) : undefined,
+        // A user explicitly setting the logistics mode by hand is a stronger signal
+        // than any heuristic/AI guess — mark it so rescoreCompany() never overwrites it.
+        logisticsModeSource: dto.logisticsMode ? "manuel" : undefined,
+      },
     });
     await this.prisma.auditLog.create({
       data: { userId: actingUserId, companyId: id, action: "UPDATE", entityType: "Company", entityId: id },

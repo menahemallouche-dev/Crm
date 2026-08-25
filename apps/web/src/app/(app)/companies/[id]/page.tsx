@@ -19,8 +19,9 @@ import {
   Ban,
   CheckCircle2,
   Trash2,
+  MessageCircle,
 } from "lucide-react";
-import { NEEDS_SCORE_LABELS, NeedsScoreKey } from "@gecodis/shared";
+import { ACTIVITY_TYPE_LABELS, ActivityType, NEEDS_SCORE_LABELS, NeedsScoreKey } from "@gecodis/shared";
 import { apiClient } from "@/lib/api-client";
 import { Card, Skeleton, EmptyState } from "@/components/ui/misc";
 import { Badge, PotentialBadge, PriorityBadge } from "@/components/ui/badge";
@@ -87,6 +88,32 @@ export default function CompanyDetailPage() {
   const removePortalUser = useMutation({
     mutationFn: async (userId: string) => (await apiClient.delete(`/companies/${id}/portal-users/${userId}`)).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["portal-users", id] }),
+  });
+
+  const [activityModalOpen, setActivityModalOpen] = useState(false);
+  const [activityForm, setActivityForm] = useState({
+    type: ActivityType.APPEL as string,
+    contactId: "",
+    subject: "",
+    summary: "",
+  });
+
+  const logActivity = useMutation({
+    mutationFn: async () =>
+      (
+        await apiClient.post("/activities", {
+          companyId: id,
+          contactId: activityForm.contactId || undefined,
+          type: activityForm.type,
+          subject: activityForm.subject || undefined,
+          summary: activityForm.summary || undefined,
+        })
+      ).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company", id] });
+      setActivityModalOpen(false);
+      setActivityForm({ type: ActivityType.APPEL, contactId: "", subject: "", summary: "" });
+    },
   });
 
   if (isLoading || !company) {
@@ -295,11 +322,17 @@ export default function CompanyDetailPage() {
 
       {tab === "Activités" && (
         <div className="space-y-2">
+          <div className="flex justify-end">
+            <button className="btn-secondary" onClick={() => setActivityModalOpen(true)}>
+              <MessageCircle size={16} /> Ajouter une activité
+            </button>
+          </div>
           {company.activities?.map((a: any) => (
             <Card key={a.id} className="flex items-start justify-between">
               <div>
-                <p className="text-sm font-medium text-ink">
-                  {a.type} {a.subject && `— ${a.subject}`}
+                <p className="text-sm font-medium text-ink flex items-center gap-2">
+                  <Badge tone="brand">{ACTIVITY_TYPE_LABELS[a.type as ActivityType] ?? a.type}</Badge>
+                  {a.subject && <span>{a.subject}</span>}
                 </p>
                 {a.summary && <p className="text-sm text-ink-muted mt-1">{a.summary}</p>}
               </div>
@@ -499,6 +532,69 @@ export default function CompanyDetailPage() {
           </div>
           <button type="submit" className="btn-primary w-full" disabled={invitePortalUser.isPending}>
             {invitePortalUser.isPending ? "Création…" : "Créer l'accès"}
+          </button>
+        </form>
+      </Modal>
+
+      <Modal open={activityModalOpen} onClose={() => setActivityModalOpen(false)} title="Ajouter une activité">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            logActivity.mutate();
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <label className="text-sm font-medium text-ink">Canal de contact</label>
+            <select
+              className="input mt-1"
+              value={activityForm.type}
+              onChange={(e) => setActivityForm({ ...activityForm, type: e.target.value })}
+            >
+              {Object.values(ActivityType).map((t) => (
+                <option key={t} value={t}>
+                  {ACTIVITY_TYPE_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </div>
+          {!!company.contacts?.length && (
+            <div>
+              <label className="text-sm font-medium text-ink">Contact concerné</label>
+              <select
+                className="input mt-1"
+                value={activityForm.contactId}
+                onChange={(e) => setActivityForm({ ...activityForm, contactId: e.target.value })}
+              >
+                <option value="">Aucun contact précis</option>
+                {company.contacts.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.firstName} {c.lastName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="text-sm font-medium text-ink">Objet</label>
+            <input
+              className="input mt-1"
+              placeholder="Ex : Relance sur devis en cours"
+              value={activityForm.subject}
+              onChange={(e) => setActivityForm({ ...activityForm, subject: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-ink">Compte rendu</label>
+            <textarea
+              className="input mt-1"
+              rows={3}
+              value={activityForm.summary}
+              onChange={(e) => setActivityForm({ ...activityForm, summary: e.target.value })}
+            />
+          </div>
+          <button type="submit" className="btn-primary w-full" disabled={logActivity.isPending}>
+            {logActivity.isPending ? "Enregistrement…" : "Enregistrer l'activité"}
           </button>
         </form>
       </Modal>

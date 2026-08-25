@@ -11,7 +11,7 @@ import {
   IsString,
   IsUrl,
 } from "class-validator";
-import { CommercialPriority, PotentialLevel, PropertyStatus } from "@prisma/client";
+import { CommercialPriority, LogisticsMode, PotentialLevel, PropertyStatus } from "@prisma/client";
 import { PaginationQueryDto } from "../../common/dto/pagination.dto";
 
 export class CreateCompanyDto {
@@ -52,6 +52,8 @@ export class UpdateCompanyDto extends CreateCompanyDto {
   @IsOptional() @IsBoolean() hasStore?: boolean;
   @IsOptional() @IsBoolean() hasLogisticsPlatform?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() estimatedWarehouseSqm?: number;
+  @IsOptional() @IsEnum(LogisticsMode) logisticsMode?: LogisticsMode;
+  @IsOptional() @IsString() logisticsSubcontractorName?: string;
 }
 
 export class QueryCompaniesDto extends PaginationQueryDto {

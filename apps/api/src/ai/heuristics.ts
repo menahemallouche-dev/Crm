@@ -1,6 +1,7 @@
 import {
   CommercialPriority,
   ContactDecisionRole,
+  LogisticsMode,
   NeedsScores,
   PotentialLevel,
 } from "@gecodis/shared";
@@ -171,6 +172,103 @@ export function inferRealEstateSignals(input: { activity?: string | null; descri
     hasStore,
     hasLogisticsPlatform,
     realEstateConfidence: overallConfidence,
+  };
+}
+
+// ─────────────────────── Logistique interne vs sous-traitée ─────────────
+
+// Prestataires logistiques / transporteurs connus (3PL) — utilisés pour repérer
+// une mention explicite du sous-traitant dans le texte libre (activité, description).
+const KNOWN_SUBCONTRACTORS = [
+  "GEODIS",
+  "XPO Logistics",
+  "XPO",
+  "DHL Supply Chain",
+  "DHL",
+  "Kuehne+Nagel",
+  "Kuehne + Nagel",
+  "DB Schenker",
+  "Schenker",
+  "DSV",
+  "Bolloré Logistics",
+  "Bolloré",
+  "ID Logistics",
+  "FM Logistic",
+  "STEF",
+  "Dachser",
+  "Rhenus Logistics",
+  "Rhenus",
+  "CEVA Logistics",
+  "CEVA",
+  "GLS",
+  "Chronopost",
+  "Colissimo",
+  "Heppner",
+  "Transalliance",
+  "Gefco",
+];
+
+const INTERNAL_LOGISTICS_KEYWORDS =
+  /logistique (int[ée]gr[ée]e|interne|propre)|flotte (propre|de camions propre)|entrep[ôo]ts? propres?|transport en propre|notre propre logistique/;
+
+const SUBCONTRACTED_LOGISTICS_KEYWORDS =
+  /sous-?trait[eé]|sous-?traitance|prestataire logistique|externalis[ée]e?|fait appel [àa]|\b3pl\b|confi[ée] [àa]/;
+
+function findKnownSubcontractor(text: string): string | null {
+  for (const name of KNOWN_SUBCONTRACTORS) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}\\b`, "i").test(text)) return name;
+  }
+  return null;
+}
+
+/**
+ * Tente de déterminer si l'entreprise gère sa logistique en interne ou la
+ * sous-traite — et, si possible, le nom du sous-traitant — à partir de
+ * signaux textuels (activité/description). Purement déterministe ; peut être
+ * affiné par une passe IA optionnelle en amont (voir ScoringService).
+ */
+export function inferLogisticsMode(input: {
+  activity?: string | null;
+  description?: string | null;
+}): {
+  logisticsMode: LogisticsMode;
+  logisticsSubcontractorName: string | null;
+  logisticsModeConfidence: number;
+} {
+  const text = `${input.activity ?? ""} ${input.description ?? ""}`;
+  const lower = text.toLowerCase();
+
+  const namedSubcontractor = findKnownSubcontractor(text);
+
+  if (namedSubcontractor) {
+    return {
+      logisticsMode: LogisticsMode.SOUS_TRAITANT,
+      logisticsSubcontractorName: namedSubcontractor,
+      logisticsModeConfidence: 80,
+    };
+  }
+
+  if (SUBCONTRACTED_LOGISTICS_KEYWORDS.test(lower)) {
+    return {
+      logisticsMode: LogisticsMode.SOUS_TRAITANT,
+      logisticsSubcontractorName: null,
+      logisticsModeConfidence: 55,
+    };
+  }
+
+  if (INTERNAL_LOGISTICS_KEYWORDS.test(lower)) {
+    return {
+      logisticsMode: LogisticsMode.INTERNE,
+      logisticsSubcontractorName: null,
+      logisticsModeConfidence: 60,
+    };
+  }
+
+  return {
+    logisticsMode: LogisticsMode.INCONNU,
+    logisticsSubcontractorName: null,
+    logisticsModeConfidence: 15,
   };
 }
 

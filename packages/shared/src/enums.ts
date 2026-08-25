@@ -144,11 +144,91 @@ export enum ContactInfluence {
 export enum ActivityType {
   APPEL = "APPEL",
   EMAIL = "EMAIL",
+  WHATSAPP = "WHATSAPP",
   VISITE = "VISITE",
   RDV = "RDV",
   TACHE = "TACHE",
   NOTE = "NOTE",
   DOCUMENT_ENVOYE = "DOCUMENT_ENVOYE",
+}
+
+export const ACTIVITY_TYPE_LABELS: Record<ActivityType, string> = {
+  [ActivityType.APPEL]: "Appel",
+  [ActivityType.EMAIL]: "Email",
+  [ActivityType.WHATSAPP]: "WhatsApp",
+  [ActivityType.VISITE]: "Visite",
+  [ActivityType.RDV]: "RDV",
+  [ActivityType.TACHE]: "Tâche",
+  [ActivityType.NOTE]: "Note",
+  [ActivityType.DOCUMENT_ENVOYE]: "Document envoyé",
+};
+
+export enum LogisticsMode {
+  INTERNE = "INTERNE",
+  SOUS_TRAITANT = "SOUS_TRAITANT",
+  INCONNU = "INCONNU",
+}
+
+export const LOGISTICS_MODE_LABELS: Record<LogisticsMode, string> = {
+  [LogisticsMode.INTERNE]: "Logistique interne",
+  [LogisticsMode.SOUS_TRAITANT]: "Sous-traitée",
+  [LogisticsMode.INCONNU]: "Inconnu",
+};
+
+/** Sector tag shown as a small icon/badge next to a company — a lightweight,
+ *  generic pictogram (not a real brand logo) inferred from its NAF code. */
+export interface SectorTag {
+  key: string;
+  label: string;
+  icon: string; // emoji, kept generic/non-trademarked
+}
+
+interface SectorDefinition {
+  key: string;
+  label: string;
+  icon: string;
+  nafPrefixRegex: RegExp;
+  /** A precise, representative NAF/APE code for this sector — used to pre-fill a
+   *  "chasse commerciale" search by métier (see prospecting module) since the
+   *  official search APIs (INSEE Sirene, Pappers) filter on an exact NAF code
+   *  rather than a prefix. Editable by the user before searching. */
+  representativeNafCode: string;
+}
+
+// NAF/APE codes appear both dotted ("52.10B") and undotted ("5210B") across providers
+// and free-text entry — `\.?` makes the dot optional so either form matches.
+const SECTOR_DEFINITIONS: SectorDefinition[] = [
+  { key: "agroalimentaire", label: "Agroalimentaire", icon: "🌾", nafPrefixRegex: /^10\.?|^11\.?/, representativeNafCode: "1039B" },
+  { key: "transport", label: "Transport routier", icon: "🚚", nafPrefixRegex: /^49\.?41|^49\.?20/, representativeNafCode: "4941A" },
+  { key: "entreposage", label: "Entreposage", icon: "📦", nafPrefixRegex: /^52\.?10/, representativeNafCode: "5210B" },
+  { key: "manutention", label: "Manutention", icon: "🏗️", nafPrefixRegex: /^52\.?24/, representativeNafCode: "5224B" },
+  { key: "affretement", label: "Affrètement", icon: "🚢", nafPrefixRegex: /^52\.?29/, representativeNafCode: "5229A" },
+  { key: "ecommerce", label: "E-commerce", icon: "🛒", nafPrefixRegex: /^47\.?91/, representativeNafCode: "4791B" },
+  { key: "commerce-gros", label: "Commerce de gros", icon: "🏬", nafPrefixRegex: /^46\.?/, representativeNafCode: "4690Z" },
+  { key: "commerce-detail", label: "Commerce de détail", icon: "🏪", nafPrefixRegex: /^47\.?/, representativeNafCode: "4719B" },
+  { key: "construction", label: "BTP / Construction", icon: "🏗️", nafPrefixRegex: /^41\.?|^42\.?|^43\.?/, representativeNafCode: "4120A" },
+];
+
+const SECTOR_RULES: [RegExp, SectorTag][] = SECTOR_DEFINITIONS.map((d) => [d.nafPrefixRegex, { key: d.key, label: d.label, icon: d.icon }]);
+
+/** Sector picklist for the prospecting search form — label + icon + a starting-point NAF code per sector. */
+export const SECTOR_OPTIONS: (SectorTag & { representativeNafCode: string })[] = SECTOR_DEFINITIONS.map((d) => ({
+  key: d.key,
+  label: d.label,
+  icon: d.icon,
+  representativeNafCode: d.representativeNafCode,
+}));
+
+export function sectorTagForNaf(nafCode?: string | null): SectorTag | null {
+  if (!nafCode) return null;
+  const normalized = nafCode.replace(/\s/g, "");
+  for (const [regex, tag] of SECTOR_RULES) {
+    if (regex.test(normalized)) return tag;
+  }
+  if (/^\d\d\./.test(normalized) || /^\d{4}/.test(normalized)) {
+    return { key: "industrie", label: "Industrie", icon: "🏭" };
+  }
+  return null;
 }
 
 export enum QuoteStatus {

@@ -1,8 +1,9 @@
-import { CommercialPriority, ContactDecisionRole, PotentialLevel } from "@gecodis/shared";
+import { CommercialPriority, ContactDecisionRole, LogisticsMode, PotentialLevel } from "@gecodis/shared";
 import {
   classifyContact,
   computeCommercialPriority,
   computePotential,
+  inferLogisticsMode,
   inferRealEstateSignals,
   scoreCompanyNeeds,
 } from "./heuristics";
@@ -103,6 +104,39 @@ describe("inferRealEstateSignals", () => {
   it("detects multiple warehouses from plural phrasing", () => {
     const result = inferRealEstateSignals({ description: "Exploite plusieurs sites logistiques en France" });
     expect(result.hasMultipleWarehouses).toBe(true);
+  });
+});
+
+describe("inferLogisticsMode", () => {
+  it("detects a named subcontractor and returns high confidence", () => {
+    const result = inferLogisticsMode({ description: "Livraisons confiées à GEODIS pour toute la France" });
+    expect(result.logisticsMode).toBe(LogisticsMode.SOUS_TRAITANT);
+    expect(result.logisticsSubcontractorName).toBe("GEODIS");
+    expect(result.logisticsModeConfidence).toBeGreaterThanOrEqual(70);
+  });
+
+  it("recognises a subcontractor even with different casing/spacing", () => {
+    const result = inferLogisticsMode({ activity: "Partenariat logistique avec xpo logistics depuis 2019" });
+    expect(result.logisticsMode).toBe(LogisticsMode.SOUS_TRAITANT);
+    expect(result.logisticsSubcontractorName).toBe("XPO Logistics");
+  });
+
+  it("detects generic outsourcing keywords without a named provider", () => {
+    const result = inferLogisticsMode({ description: "La logistique est sous-traitée à un prestataire externe" });
+    expect(result.logisticsMode).toBe(LogisticsMode.SOUS_TRAITANT);
+    expect(result.logisticsSubcontractorName).toBeNull();
+  });
+
+  it("detects an in-house/internal logistics setup", () => {
+    const result = inferLogisticsMode({ description: "Dispose de sa propre flotte de camions et d'entrepôts propres" });
+    expect(result.logisticsMode).toBe(LogisticsMode.INTERNE);
+  });
+
+  it("stays INCONNU with low confidence when there is no textual signal", () => {
+    const result = inferLogisticsMode({});
+    expect(result.logisticsMode).toBe(LogisticsMode.INCONNU);
+    expect(result.logisticsSubcontractorName).toBeNull();
+    expect(result.logisticsModeConfidence).toBeLessThan(30);
   });
 });
 
